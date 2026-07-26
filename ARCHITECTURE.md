@@ -50,8 +50,9 @@ src/
 │   ├── DialogPannelPatch.cs       ★核心★ 白天三层管线的消费层 + 主线程派发通道 + 覆盖层调度
 │   ├── OpenDialogMenuPatch.cs     白天兜底：注入 overrideReplaceTextCallback（已双钉委托）
 │   ├── MainThreadDispatcher.cs    主线程派发：纯 ConcurrentQueue，EventSystem.Update drain
-│   ├── NightChatPatch.cs          夜晚取数点：稀客闲聊/评价语登记 PendingBubble + 气泡原地改写
-│   └── NightDiagPatch.cs          【临时诊断】PostEvaluation 锚点 + 帧节流气泡 watcher
+│   ├── NightBubblePatch.cs        ★夜晚正式实现★ 零夜场景 patch：帧泵扫气泡→甄别→登记→原地改写
+│   ├── NightChatPatch.cs          【已下线·仅参考】旧夜晚方案（postfix 取数点，启动闪退根因）
+│   └── NightDiagPatch.cs          【已下线·仅参考】临时诊断（PostEvaluation 锚点 + 帧 watcher）
 ├── Reply/
 │   └── IPlayerReplyChannel.cs     玩家回复通道接口（自由输入扩展预留）
 └── UI/
@@ -84,7 +85,7 @@ AI 回调 → MainThreadDispatcher.Post（纯托管队列）
 - **主线程预取**：游戏时间/报纸/语言等 IL2CPP 调用全部在主线程完成，线程池只碰托管字符串（血的教训，见 5.2）
 - 失败/超时：占位符回退原文
 
-### 4.2 夜晚链路与白天完全不同（调查定案）
+### 4.2 夜晚链路与白天完全不同（调查定案 + 正式实现已落地）
 
 营业闲聊/评价**不走 DialogPackage/DialogPannel 管线**：
 
@@ -92,10 +93,18 @@ AI 回调 → MainThreadDispatcher.Post（纯托管队列）
 - `GuestGroupController.OnRequestEvaluationDialog(EvaluationResult, out Transform)` → 直接返回 string（评价）
 - 显示：`GuestsManager` 协程 → `ShowTargetDialog` → `NightScene.UI.GuestManagementUtility.DialogBoxUI` 气泡（评价用子类 `EvalulationBoxUI`，5 套皮肤）
 
-postfix 必须立刻返回 string（等不了 AI），所以夜晚方案是**「原文先行 + 原地改写」**：
+**正式实现（NightBubblePatch，纯安全锚点，零夜场景 patch）**：帧泵挂在 DialogPannelPatch 的
+EventSystem.Update postfix 同链，每 30 帧：相位闸门（Work/BeforeChallengeStart/Challenge/YuyukoStageChange）
+→ 轮询 `GuestsManager.AllPresentedGuestGroupController`（HasEvaluated 翻转检测 + PeekOrders 提前缓存菜品）
+→ `FindObjectsOfType<DialogBoxUI>(true)` 扫气泡 → 甄别（评价=EvalulationBoxUI+翻转窗口内+皮肤 sprite 反推等级；
+闲聊=followTarget 反查稀客+SpecialConversation 池命中）→ 登记生成 → watcher 超时兜底
+→ MainThreadDispatcher.Post 回主线程 → 气泡活着且文本仍是原文 → tmp.text 原地改写。
+数据通路细节与证据见 docs/game-api.md 第 G 章。
+
+旧方案（NightChatPatch，postfix 直接挂取数点）因启动闪退根因已永久下线，仅作参考保留：
 
 ```
-OnRequestXxxDialog postfix → 不改 __result（游戏立即显示原文气泡，失败天然回退）
+【历史】OnRequestXxxDialog postfix → 不改 __result（游戏立即显示原文气泡，失败天然回退）
     → 同帧主线程预取上下文，发起 AI 生成，登记 PendingBubble(原文+场景)
 DialogBoxUI.SetMessage/SetMessageAsync postfix → 按原文匹配认领气泡实例
 watcher（Task.WhenAny 超时）→ MainThreadDispatcher.Post 回主线程

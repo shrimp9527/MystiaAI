@@ -29,9 +29,10 @@ public sealed class Plugin : BasePlugin
         harmony.PatchAll(typeof(Plugin).Assembly);
         // DialogPannel 相关 patch 手动注册并自检（第四轮实测证明特性式 patch 可能静默失效）
         Patches.DialogPannelPatch.Install(harmony);
-        // 【暂时停用】营业场景 patch 全部下线回滚：存档含待结算评价，加载时游戏自调
-        // PostEvaluation → OnRequestEvaluationDialog，我们的 postfix 在半成品实例上崩（签名 A）。
-        // 白天链路（05:53 实机验证）不受影响。夜晚功能待按「纯安全锚点」方案重做后再恢复。
+        // 夜晚营业气泡（闲聊+评价语）：纯安全锚点方案——零夜场景 patch，
+        // 帧泵挂在 DialogPannelPatch 的 EventSystem.Update postfix 同链（见 NightBubblePatch 类注释）。
+        Patches.NightBubblePatch.Install(harmony);
+        // 【保持下线】旧的夜场景方法 patch 方案（启动闪退根因），代码仅作参考保留：
         // Patches.NightChatPatch.Install(harmony);
         // Patches.NightDiagPatch.Install(harmony);
 

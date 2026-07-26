@@ -507,6 +507,7 @@ internal static class DialogPannelPatch
     {
         FreeInputOverlay.PollHotkeys();
         MainThreadDispatcher.Drain(); // 先 Poll 后 drain：Poll 入队的 Close 同帧即可执行
+        NightBubblePatch.OnEventSystemFrame(); // 夜晚气泡帧泵（同链复用本 postfix，内部 30 帧节流 + 相位闸门）
     }
 
     /// <summary>主线程 drain 备选派发队列（仅 Update 通道未建立时兜底）。覆盖层轮询泵已挪到 EventSystem.Update。</summary>

@@ -506,3 +506,120 @@ public string GenerateRandomConvMessage();
   - `Patches/Common/UniversalGameManagerPatch.cs` — `OpenDialogMenu` Prefix；
   - `Patches/CoreLanguage/NightSceneLanguagePatch.cs` — Initialize postfix 改语言池；
   - `Patches/DayScene/DaySceneChatSelectionPannel__c__DisplayClass17_0Patch.cs` — 动态放开「闲聊」选项。
+
+---
+
+## G. 夜晚气泡只读方案可行性（2026-07-26 调查定案）
+
+> 背景：夜场景方法 patch 全部下线后游戏稳定。新方案原则——**不 patch 任何夜场景方法**，
+> 只用 `EventSystem.Update` postfix 帧轮询 + `FindObjectsOfType<DialogBoxUI>(true)` 两个已证明安全的通道，
+> 营业中发现气泡 → 主线程读游戏数据 → AI 生成 → 气泡原地改写 `tmp.text`。
+> 以下逐条是 decomp 证据；新增反编译产物：`decomp/NightScene_UI_DialogBoxUI.cs`、`decomp/NightScene_UI_EvalulationBoxUI.cs`、`decomp/Common_WorldSpaceUITracker.cs`。
+
+### G.1 气泡实例能读到什么
+
+`NightScene.UI.GuestManagementUtility.DialogBoxUI : MonoBehaviour`（`decomp/NightScene_UI_DialogBoxUI.cs:19`）：
+
+- `text : TextMeshProUGUI`（:366）——改写落点；
+- `m_WorldSpaceUITracker : WorldSpaceUITracker`（:381）→ `m_FollowTarget : Transform`（`decomp/Common_WorldSpaceUITracker.cs:78`）——跟随的客人；
+- `m_CancellationTokenSource`（:396）；static `DIALOG_BOX_OFFSET` / `DIALOG_BOX_SHOW_DURATION`。
+
+子类 `EvalulationBoxUI : DialogBoxUI`（`decomp/NightScene_UI_EvalulationBoxUI.cs:15`）：
+
+- 5 套皮肤字段 `exBadSkin/badSkin/normalSkin/goodSkin/exGoodSkin`（:329~:397，各含 box/handle/head 三个 Sprite）；
+- 当前应用的 `box/handle/head/heart : Image`（:399~:457）；
+- `SetMessage(string, EvaluationResult, Transform)`（:480）。
+
+**实例上不存 evaluationType**（它只是 `<SetMessage>d__9` 协程参数，:146），但**评价等级可反推**：
+比较 `box.sprite` 与 5 个 skin 的 `box` Sprite 引用（5 次引用比较），`heart` Image 的显隐大概率是 ExGood 标记（需实测）。
+**气泡类型判别**：`box.TryCast<EvalulationBoxUI>() != null` = 评价气泡；否则为普通 DialogBoxUI（闲聊/驱赶等）。
+
+### G.2 followTarget → 稀客身份（关键反查链）
+
+**`GuestGroupController` 不是 MonoBehaviour**（`: Il2CppSystem.Object`，`decomp/NightScene_GuestManagementUtility_GuestGroupController.cs:20`），
+GetComponent 链不存在。反查走「控制器枚举 + guestInstances 匹配」：
+
+1. `GuestsManager : MonoSingleton<GuestsManager>`（`decomp/NightScene_GuestManagementUtility_GuestsManager.cs:25`），
+   `Instance` 可用。枚举入口（全 public）：
+   - `AllPresentedGuestGroupController : HashSet<GuestGroupController>`（:9985）——全部在场控制器；
+   - `AllGuestInDeskController : IEnumerable<GuestGroupController>`（:10669，CallerCount(23)，游戏自己大量用）；
+   - `GetInDeskGuest(int deskCode) : GuestGroupController`（token :10831）；
+   - `currentDisplayedDialogBox : Dictionary<GuestGroupController, Il2CppSystem.Action>`（:9825）——
+     **正在显示气泡的控制器 → 关闭回调**，可直接回答「谁现在头上有气泡」。
+2. `GuestGroupController.guestInstances : Il2CppReferenceArray<AStarInputGeneratorComponent>`（`..._GuestGroupController.cs:3230`）。
+   `AStarInputGeneratorComponent : CharacterControllerInputGeneratorComponent`（`Common.CharacterUtility`，MonoBehaviour 链，有 `.transform`）。
+   `ShowTargetDialog` 的闭包 lambda 就收 `AStarInputGeneratorComponent`（`..._GuestsManager.cs:6476`）——气泡 followTarget 由客人可视组件派生。
+   **匹配法**：`followTarget == inst.transform` 或 `followTarget.IsChildOf(inst.transform)`，逐控制器逐实例比对。
+3. 命中后 `controller.TryCast<SpecialGuestsController>()?.SpecialGuest`（`..._SpecialGuestsController.cs:898` backing field）
+   → `.StringId`（personas.json key）；普通客人 TryCast 为 null 即区分。
+   羁绊等级：`RunTimeAlbum.GetOrGenerateSpecialNPCKizunaLevel(id)` 或 `RefOrGenerateSpecialRunTimeData(id).CurrentBondLevel`（见 F 节）。
+
+### G.3 评价上下文（等级/菜品/触发时机）
+
+- **「哪组刚评价完」**：`GuestGroupController.HasEvaluated : bool`（`..._GuestGroupController.cs:4945`）。
+  帧 watcher 轮询 `AllGuestInDeskController`，检测 false→true 翻转 = 该组刚完成评价（与评价气泡出现同窗口）。
+- **评价等级**：气泡侧 skin sprite 比较（G.1）；
+- **菜品**：`controller.PeekOrders() : GuestsManager.OrderBase`（:5823，**CallerCount(25)**——游戏自身 25 处调它，
+  属常规只读访问器；加载期崩溃是「半成品实例 + patch 上下文」特例，营业相位 + 在册控制器上是游戏正常路径）。
+  `OrderBase.ServFood : Sellable`（`..._GuestsManager.cs:467`，`.Text?.Name` 链在 NightChatPatch 已编译验证）、
+  `ServBeverage`（:493）、`DeskCode`（:560）、`IsFullfilled`（:575）。
+  **残留风险**：评价气泡弹出时订单可能已出栈 → PeekOrders 取不到。备选：提前在 `IsFullfilled`/`ServedFoodInAir`（:638）
+  非空时缓存 ServFood，或接受取不到（prompt 退化为无菜名）。
+- `PostEvaluation` 流程结束时游戏内部触发 `OnEvalFinishCallback` 事件（:4808）——**不要订阅**
+  （managed 委托移交 native 是签名 A 高危模式），轮询 HasEvaluated 已够用。
+
+### G.4 闲聊/评价/bark/点单甄别
+
+- **评价 vs 非评价**：实例类型判别（G.1）即可。
+- **稀客闲聊**（普通 DialogBoxUI + followTarget 属 SpecialGuestsController）：文本源自
+  `NightSceneLanguage.SpecialConversation[id]`（`decomp/GameData_CoreLanguage_Collections_NightSceneLanguage.cs:444`）
+  经 `GenerateSpecialConv(id)`（:542）拼出。**可用「文本命中闲聊池片段」做佐证甄别**（池为主线程可读 static；
+  StructPtr<string> 是 TSV 行包装，精确匹配规则需实测一轮确认）。
+  非闲聊的普通 DialogBoxUI：驱赶（ShowRepellDialog/ShowSeenRepellDialog）、没钱、ForceDialogDeskCode 强制对话——
+  用池成员性 + `CanIdleDialog`（`..._GuestGroupController.cs:4921`）排除。
+- **顶仓 bark**：timeline 资产 `NS_MGuest_PlayEvaluationDialog_Special` 带 `label + evaluationResult`
+  （`decomp/NightScene_TimelineExtestion_NS_MGuest_PlayEvaluationDialog_Special.cs:38`）——**符卡 bark 也走评价气泡通道，
+  实例同样是 EvalulationBoxUI**。甄别：bark 不伴随 `HasEvaluated` 翻转（那是吃饭评价专用状态），
+  且出现时游戏在播符卡 timeline。规则：**只改「HasEvaluated 翻转窗口内出现」的评价气泡**（需实测验证 bark 不翻转该标志）。
+- **点单**：`ShowOrder` 是 private（token :10885），点单呈现走 `guestIconManager`/HUD 图标，
+  不走 DialogBoxUI 文本气泡；普通客人点单对话是否产生 DialogBoxUI 需首轮实测确认（确认后按「非稀客直接跳过」处理）。
+
+### G.5 扫描性能与更省入口
+
+- `FindObjectsOfType(Il2CppType.From(typeof(DialogBoxUI)), true)` 每 30 帧一次：诊断构建已实机跑过，安全（用户实证）。
+  实例数 = 活动气泡数，最多 桌位数+排队 级别（个位数到十几个）。
+- **更省入口**：`GuestsManager.Instance.uiContainer : Canvas`（:9690）→ `GetComponentsInChildren<DialogBoxUI>(true)`，
+  只扫 UI 子树不扫全场景（气泡父级在 UI canvas 下，需首轮实测确认全都在该 canvas 下）。
+- 管理器不持有气泡实例列表（`currentDisplayedDialogBox` 的 value 是关闭回调不是 box）；评价气泡有对象池
+  （`_pushCallback_5__3 : Action<EvalulationBoxUI>`，:6640）但无公开注册表。结论：先 FindObjectsOfType，
+  有性能问题再切 uiContainer 子树扫描。
+
+### G.6 GamePhase 营业相位覆盖
+
+`RunTimeScheduler.GamePhase`（`decomp/GameData_RunTime_Common_RunTimeScheduler.cs:34-53`）：
+`Day, DayTimeEnd, DayToPreperation, Preperation, PreperationToWork, BeforeWorkStart, **Work**, WorkEnd,
+WorkToResult, Result, ResultToDay, BeforeChallengeStart, Challenge, BeforeChallengeEnd, YuyukoStageChange,
+KyoukoTutorial, KyoukoTutorialEnd`。
+
+- 完整营业时段 = `Work`（普通营业）+ `BeforeChallengeStart/Challenge`（Boss 挑战营业）；
+  `YuyukoStageChange` 是幽幽子战中途换阶段（营业中），建议一并放行；`BeforeWorkStart` 是开门前准备，客人未入座，放行无害。
+- `CurrentGamePhase`（:11759）getter 的 CallerCount(0)——游戏 native 侧直接读 backing 字段，属性本身有效
+  （IsNightWorkPhase 已随启动修复部署，相位闸门行为待用户实测顺带验证）。
+
+### G.7 可行性结论
+
+| 链路环节 | 数据支撑 | 结论 |
+|---|---|---|
+| 发现气泡 | FindObjectsOfType 每 30 帧（诊断构建实证安全）/ uiContainer 子树 | ✅ |
+| 甄别评价 vs 闲聊 | 实例类型 TryCast&lt;EvalulationBoxUI&gt; | ✅ |
+| 甄别 bark vs 吃饭评价 | HasEvaluated 翻转窗口关联（待实测验证 bark 不翻转） | ⚠️ 有方案待验证 |
+| 甄别闲聊 vs 驱赶/强制 | SpecialConversation 池成员性 + CanIdleDialog | ✅（匹配规则待一轮实测） |
+| 取稀客身份 | followTarget ↔ guestInstances 匹配 → TryCast → SpecialGuest.StringId；kizuna 走 RunTimeAlbum | ✅ |
+| 取评价等级 | skin sprite 引用比较 ×5（heart 显隐佐证 ExGood） | ✅ |
+| 取菜品 | PeekOrders（CallerCount 25，营业期正常路径）；订单已出栈时提前缓存兜底 | ✅ 有兜底 |
+| 原地改写 | text.text 主线程写（白天链路同款，已稳定） | ✅ |
+| 触发时机 | 轮询 HasEvaluated 翻转 + 气泡出现双条件，零事件订阅零 patch | ✅ |
+
+**结论：可以开工。** 每一环都有只读数据支撑，无一环需要 patch 夜场景方法或订阅 IL2CPP 事件。
+两个待实测验证点（bark 不翻转 HasEvaluated、闲聊池文本匹配规则）不阻塞架构，
+首轮实现时保留 DIAG 日志一轮即可定案；菜品取数有「提前缓存」兜底，取不到时 prompt 降级为无菜名而非失败。
