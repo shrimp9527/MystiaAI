@@ -16,10 +16,13 @@ using UnityEngine.UI;
 namespace MystiaAI.UI;
 
 /// <summary>
-/// 自由输入覆盖层（PoC）：轮到米斯蒂娅（Self）的台词时弹出。
+/// 自由输入覆盖层：轮到米斯蒂娅（Self）的台词时弹出。
+/// 视觉原则：不做独立面板——主面板精确覆盖游戏对话框（同位置/同尺寸/同底色，底图 sprite 能复刻就复刻），
+/// 看起来就是对话框本身：上半区透明背景输入区（米白大字居中 + 灰色占位提示），
+/// 右上角并排的「重新生成推荐回复」与「完成」小按钮，底部两个并排的 AI 建议按钮（深色底米白字）；
+/// 提交只走鼠标点击（完成/建议按钮）——键盘 Enter/Esc 检测在本环境多条通道均不可靠，已移除。
 /// 层级策略：不做独立的 ScreenSpaceOverlay（实测被游戏对话框压住），
-/// 而是挂到 DialogPannel 所在的根 Canvas 之下，overrideSorting + 全场景最大
-/// sortingOrder + 1000，保证渲染在对话框之上且射线不被挡。
+/// 而是挂到 DialogPannel 所在的根 Canvas 之下，siblingIndex 插在游戏指针节点前，保证渲染在对话框之上且射线不被挡。
 /// 纯 GameObject + uGUI/TMP 内置组件拼装，不使用自定义 MonoBehaviour。
 /// 创建流程每一步独立 try-catch 并带步骤名日志，任一步失败一眼定位。
 /// </summary>
@@ -43,13 +46,27 @@ internal sealed class FreeInputOverlay
     private bool _cursorVisibleWas;
 
     /// <summary>
-    /// 确认/跳过按钮引用（点击检测用）。
+    /// 「重新生成推荐回复」按钮引用（点击检测用）。
     /// 崩溃转储证实：两个 dmp 都死在 coreclr.dll+0x1d1fdd（native UnityEvent → managed 委托 thunk），
     /// 且钉住委托后崩溃原样复现——Il2CppInterop 的 UnityEvent 回调通道在本环境不可用。
     /// 因此按钮不再订阅 onClick，改为 Poll 里轮询鼠标位置 + RectTransform 命中检测（纯只读原生调用）。
     /// </summary>
-    private Button? _confirmButton;
-    private Button? _skipButton;
+    private Button? _regenButton;
+
+    /// <summary>「完成」按钮引用（点击检测用，命中后提交输入框文本，等价于回车发送）。</summary>
+    private Button? _doneButton;
+
+    /// <summary>打开时传入的建议 provider（「重新生成推荐回复」复用再跑一遍）。</summary>
+    private Func<CancellationToken, Task<IReadOnlyList<string>>>? _suggestionProvider;
+
+    /// <summary>建议生成进行中（重新生成按钮防重复点击）。</summary>
+    private bool _suggestionsLoading;
+
+    /// <summary>对话正文同款米白色（输入文字/按钮文字/占位提示的基色）。</summary>
+    private static readonly Color OffWhite = new(0.96f, 0.94f, 0.88f);
+
+    /// <summary>建议/重新生成按钮底色：比对话框底色稍深的深色。</summary>
+    private static readonly Color ButtonBg = new(0.10f, 0.09f, 0.12f, 0.92f);
 
     /// <summary>Close 已排队到 Update 通道（防 Poll 在 drain 前重复入队）。</summary>
     private bool _closeQueued;
@@ -78,7 +95,7 @@ internal sealed class FreeInputOverlay
         PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 输入覆盖层已打开");
     }
 
-    /// <summary>热键轮询（由 DialogPannel.OnGUI postfix 在主线程调用）：Enter=确认，Esc=跳过。</summary>
+    /// <summary>轮询（由 DialogPannel.OnGUI postfix 在主线程调用）：鼠标命中检测 + 聚焦/键盘屏蔽联动 + 会话存活检测。</summary>
     public static void PollHotkeys()
     {
         try
@@ -223,74 +240,202 @@ internal sealed class FreeInputOverlay
                 $"siblingIndex={_root.transform.GetSiblingIndex()} 父级={(gameRoot == null ? "<场景根>" : gameRoot.name)}");
         });
 
-        // ---- 背景面板（加高以容纳两个建议按钮）----
+        // ---- 主面板：对齐「对话正文文本」（panel.context）的矩形，背景全透明——
+        // 游戏自己的对话框底图/边框保持可见，我们的内容直接画在对话框内部。
+        // （此前按「层级内最大 Image」对齐踩过的坑：对话框底图是 1280x720 全屏纹理，
+        //   底框艺术烘在 FGImage 全屏纹理里，按 Image 对齐必然错位。）
         Transform? panelTf = null;
-        Step("创建背景面板", () =>
+        var panelPos = new Vector2(0f, -300f);
+        var panelSize = new Vector2(1000f, 340f);
+        var textPos = Vector2.zero;  // 正文矩形中心（覆盖层根 local 单位）
+        var textSize = Vector2.zero; // 正文矩形尺寸（覆盖层根 local 单位）
+        var matched = false;
+        Step("创建主面板", () =>
         {
-            var panelGo = NewUi("Panel", _root.transform, new Vector2(0f, -300f), new Vector2(1000f, 340f));
+            if (!UnityObjectGuard.IsDead(panel) && gameRoot != null)
+            {
+                try
+                {
+                    var textArea = FindDialogTextArea(panel);
+                    if (textArea != null &&
+                        TryMatchRect(textArea, _root.GetComponent<RectTransform>(), out var p, out var s))
+                    {
+                        textPos = p;
+                        textSize = s;
+                        matched = true;
+                        // 面板 = 正文矩形外扩 4 单位的包络（纯透明点击拦截层）
+                        var top = textPos.y + textSize.y / 2f + 4f;
+                        var bottom = textPos.y - textSize.y / 2f - 4f;
+                        panelPos = new Vector2(textPos.x, (top + bottom) / 2f);
+                        panelSize = new Vector2(textSize.x + 8f, top - bottom);
+                        PluginContext.Log.LogInfo(
+                            $"[MystiaAI] FreeInputOverlay: 已对齐对话正文 textPos={textPos} textSize={textSize} " +
+                            $"panelPos={panelPos} panelSize={panelSize}");
+                    }
+                    else
+                    {
+                        PluginContext.Log.LogWarning(
+                            $"[MystiaAI] FreeInputOverlay: 正文矩形换算失败（textArea={(textArea == null ? "<无>" : textArea.name)}）");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    PluginContext.Log.LogWarning($"[MystiaAI] FreeInputOverlay: 对话正文矩形获取失败: {ex.Message}");
+                }
+            }
+            if (!matched)
+                PluginContext.Log.LogWarning("[MystiaAI] FreeInputOverlay: 未定位到对话正文矩形，回退固定布局");
+
+            var panelGo = NewUi("Panel", _root.transform, panelPos, panelSize);
             var bg = panelGo.AddComponent<Image>();
-            bg.color = new Color(0f, 0f, 0f, 0.85f);
+            // 透明（alpha=0）但保留 raycastTarget：游戏对话框底图透出来，点击仍被我们拦截不穿透
+            bg.color = matched ? new Color(0f, 0f, 0f, 0f) : new Color(0f, 0f, 0f, 0.85f);
             panelTf = panelGo.transform;
         });
         if (panelTf == null) return; // 背景都失败就不再往下建，避免半残 UI
 
-        // ---- 输入框 ----
+        // ---- 布局度量（相对面板：输入区=正文矩形即上方打字区，其下并排两个建议按钮，
+        //      正文右上角两个并排小按钮：重新生成 + 完成）----
+        const float gap = 10f;
+        var regenSize = new Vector2(160f, 30f);
+        var doneSize = new Vector2(64f, 30f);
+        Vector2 inputPos, inputSize, regenPos, donePos;
+        float suggY, suggW, suggH;
+        if (matched)
+        {
+            // 正文区域内部分配：上部=输入区（宽度比正文略窄），底部条=两个并排建议按钮。
+            // （实测正文区下方到对话框底边只有几像素，按钮放正文区之外必然超出对话框，只能放区内底部。）
+            suggH = 34f;
+            suggW = (textSize.x - 40f - gap) / 2f;
+            var textTop = textPos.y + textSize.y / 2f;
+            var textBottom = textPos.y - textSize.y / 2f;
+            var suggCenterY = textBottom + 3f + suggH / 2f;              // 相对覆盖层根
+            var inputTop = textTop - 2f;
+            var inputBottom = suggCenterY + suggH / 2f + 3f;
+            inputSize = new Vector2(textSize.x - 40f, Mathf.Max(36f, inputTop - inputBottom));
+            inputPos = new Vector2(textPos.x, (inputTop + inputBottom) / 2f);
+            donePos = new Vector2(
+                textPos.x + inputSize.x / 2f - 4f - doneSize.x / 2f,
+                inputTop - 2f - doneSize.y / 2f);
+            regenPos = new Vector2(
+                donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
+                donePos.y);
+            // 换算为相对面板中心
+            suggY = suggCenterY - panelPos.y;
+            inputPos -= panelPos;
+            regenPos -= panelPos;
+            donePos -= panelPos;
+        }
+        else
+        {
+            var pad = 14f;
+            suggH = 44f;
+            suggW = (panelSize.x - 2f * pad - gap) / 2f;
+            suggY = -panelSize.y / 2f + pad + suggH / 2f;
+            var inputTop = panelSize.y / 2f - pad - regenSize.y - gap;
+            var inputBottom = -panelSize.y / 2f + pad + suggH + gap;
+            inputSize = new Vector2(panelSize.x - 2f * pad, Mathf.Max(40f, inputTop - inputBottom));
+            inputPos = new Vector2(0f, (inputTop + inputBottom) / 2f);
+            donePos = new Vector2(
+                panelSize.x / 2f - pad - doneSize.x / 2f,
+                panelSize.y / 2f - pad - doneSize.y / 2f);
+            regenPos = new Vector2(
+                donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
+                donePos.y);
+        }
+
+        // ---- 输入框（背景近似透明融入面板，米白大字居中，灰色占位提示）----
         Step("创建输入框", () =>
         {
-            var inputGo = NewUi("Input", panelTf, new Vector2(0f, 115f), new Vector2(920f, 60f));
+            var inputGo = NewUi("Input", panelTf, inputPos, inputSize);
             var inputImg = inputGo.AddComponent<Image>();
-            inputImg.color = new Color(1f, 1f, 1f, 0.95f);
+            inputImg.color = new Color(1f, 1f, 1f, 0.05f); // 极浅高光，近似透明
 
-            var textGo = NewUi("Text", inputGo.transform, Vector2.zero, new Vector2(890f, 50f));
+            var textGo = NewUi("Text", inputGo.transform, Vector2.zero, inputSize - new Vector2(20f, 8f));
             var textComp = textGo.AddComponent<TextMeshProUGUI>();
             if (font != null) textComp.font = font;
-            textComp.fontSize = 30f;
-            textComp.color = Color.black;
+            textComp.fontSize = 32f;
+            textComp.color = OffWhite;
+            textComp.alignment = TextAlignmentOptions.Center;
+            textComp.raycastTarget = false; // 点击穿透给输入框本体
+
+            var phGo = NewUi("Placeholder", inputGo.transform, Vector2.zero, inputSize - new Vector2(20f, 8f));
+            var phComp = phGo.AddComponent<TextMeshProUGUI>();
+            if (font != null) phComp.font = font;
+            phComp.fontSize = 32f;
+            phComp.color = new Color(0.85f, 0.83f, 0.78f, 0.5f);
+            phComp.alignment = TextAlignmentOptions.Center;
+            phComp.text = "说点什么…";
+            phComp.raycastTarget = false;
 
             _input = inputGo.AddComponent<TMP_InputField>();
             _input.textComponent = textComp;
+            _input.placeholder = phComp;
             _input.targetGraphic = inputImg;
             _input.lineType = TMP_InputField.LineType.SingleLine;
             _input.text = string.Empty;
         });
 
-        // ---- AI 建议按钮（初始「生成中…」不可点）----
-        Step("创建建议按钮1", () => CreateSuggestionButton(panelTf, 0, new Vector2(0f, 45f), font));
-        Step("创建建议按钮2", () => CreateSuggestionButton(panelTf, 1, new Vector2(0f, -11f), font));
+        // ---- AI 建议按钮（底部左右并排，深色底米白字；初始「生成中…」不可点）----
+        Step("创建建议按钮1", () => CreateSuggestionButton(panelTf, 0,
+            new Vector2(-(suggW + gap) / 2f, suggY), new Vector2(suggW, suggH), font));
+        Step("创建建议按钮2", () => CreateSuggestionButton(panelTf, 1,
+            new Vector2((suggW + gap) / 2f, suggY), new Vector2(suggW, suggH), font));
 
-        // ---- 确认/跳过按钮 ----
-        Step("创建确认按钮", () =>
-            _confirmButton = CreateButton(panelTf, "确认", new Vector2(-260f, -100f), font, () => Close(_input.text)));
-        Step("创建跳过按钮", () =>
-            _skipButton = CreateButton(panelTf, "跳过", new Vector2(260f, -100f), font, () => Close(null)));
-
-        // ---- 聚焦（需要 EventSystem，没有就跳过聚焦只记日志）----
-        Step("聚焦输入框", () =>
+        // ---- 右上角并排小按钮：重新生成推荐回复 + 完成（提交输入）----
+        Step("创建重新生成按钮", () =>
         {
-            if (_input == null) return;
-            if (EventSystem.current == null)
-            {
-                PluginContext.Log.LogWarning("[MystiaAI] FreeInputOverlay: 无 EventSystem，跳过 ActivateInputField");
-                return;
-            }
-            _input.ActivateInputField();
+            _regenButton = CreateStyledButton(panelTf, "重新生成", regenPos, regenSize, font,
+                "重新生成推荐回复", 18f, out _);
+        });
+        Step("创建完成按钮", () =>
+        {
+            _doneButton = CreateStyledButton(panelTf, "完成", donePos, doneSize, font,
+                "完成", 18f, out _);
         });
 
+        // ---- 聚焦策略：不自动聚焦——用户点击输入框后才进入输入态（Poll 里检测点击命中后 Activate）。
+        // 聚焦期间 Poll 会禁用 InputSystem 键盘设备，屏蔽游戏全部快捷键（J/K/Ctrl/Esc/W 等）----
+        PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 覆盖层就绪，等待点击输入框聚焦");
+
         // ---- 异步获取 AI 建议 ----
+        _suggestionProvider = suggestionProvider; // 重新生成按钮复用
         Step("获取AI建议", () => StartSuggestions(suggestionProvider));
     }
 
     // ---- AI 建议：状态机（生成中… → 可用 / 建议不可用；点击=采用并确认）----
 
-    private void CreateSuggestionButton(Transform parent, int index, Vector2 pos, TMP_FontAsset? font)
+    private void CreateSuggestionButton(Transform parent, int index, Vector2 pos, Vector2 size, TMP_FontAsset? font)
     {
-        var label = "生成中…";
-        var btn = CreateWideButton(parent, $"建议{index + 1}", pos, font, label, out var labelComp);
+        var btn = CreateStyledButton(parent, $"建议{index + 1}", pos, size, font, "生成中…", 22f, out var labelComp);
         btn.interactable = false;
-        // 不订阅 onClick（UnityEvent → managed thunk 会崩，见 _confirmButton 注释）；
+        // 不订阅 onClick（UnityEvent → managed thunk 会崩，见 _regenButton 注释）；
         // 点击由 Poll 轮询鼠标位置 + 命中检测
         _suggestionButtons[index] = btn;
         _suggestionLabels[index] = labelComp;
+    }
+
+    /// <summary>深色底米白字按钮（建议/重新生成共用）；返回 Button 并 out 出文本组件，供状态机改文案/置灰。</summary>
+    private static Button CreateStyledButton(Transform parent, string name, Vector2 pos, Vector2 size,
+        TMP_FontAsset? font, string label, float fontSize, out TextMeshProUGUI labelComp)
+    {
+        var go = NewUi(name + "Button", parent, pos, size);
+        var img = go.AddComponent<Image>();
+        img.color = ButtonBg;
+        var btn = go.AddComponent<Button>();
+        btn.targetGraphic = img;
+        // 不订阅 onClick（UnityEvent → managed thunk 会崩）；不可点时 Button 默认 ColorTint 自动半透明灰化
+
+        var textGo = NewUi("Label", go.transform, Vector2.zero, size - new Vector2(12f, 4f));
+        var text = textGo.AddComponent<TextMeshProUGUI>();
+        if (font != null) text.font = font;
+        text.text = label;
+        text.fontSize = fontSize;
+        text.color = OffWhite;
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
+        labelComp = text;
+        return btn;
     }
 
     private void StartSuggestions(Func<CancellationToken, Task<IReadOnlyList<string>>>? provider)
@@ -300,6 +445,7 @@ internal sealed class FreeInputOverlay
             SetSuggestionsUnavailable();
             return;
         }
+        _suggestionsLoading = true;
 
         PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 建议任务启动");
         _ = Task.Run(async () =>
@@ -332,6 +478,7 @@ internal sealed class FreeInputOverlay
     {
         PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: ApplySuggestions 进入");
         if (_closed) return;
+        _suggestionsLoading = false;
         try
         {
             if (result == null || result.Count == 0)
@@ -366,6 +513,7 @@ internal sealed class FreeInputOverlay
 
     private void SetSuggestionsUnavailable()
     {
+        _suggestionsLoading = false;
         try
         {
             for (var i = 0; i < _suggestionButtons.Length; i++)
@@ -383,9 +531,185 @@ internal sealed class FreeInputOverlay
         }
     }
 
-    /// <summary>按钮显示用截断（完整文本照常提交）。</summary>
+    /// <summary>按钮回到「生成中…」并清空旧建议（初次生成与重新生成共用，生成中防重复点击）。</summary>
+    private void SetSuggestionsLoading()
+    {
+        try
+        {
+            _suggestionsLoading = true;
+            for (var i = 0; i < _suggestionButtons.Length; i++)
+            {
+                if (UnityObjectGuard.IsDead(_suggestionButtons[i]) || UnityObjectGuard.IsDead(_suggestionLabels[i])) continue;
+                _suggestions[i] = null;
+                _suggestionLabels[i].text = "生成中…";
+                _suggestionButtons[i].interactable = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogError($"[MystiaAI] FreeInputOverlay.SetSuggestionsLoading 异常: {ex}");
+        }
+    }
+
+    /// <summary>「重新生成推荐回复」点击：复用打开时的 provider 再跑一遍（生成中/无 provider 时忽略）。</summary>
+    private void RegenSuggestions()
+    {
+        if (_closed || _suggestionsLoading || _suggestionProvider == null) return;
+        PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 重新生成推荐回复");
+        SetSuggestionsLoading();
+        StartSuggestions(_suggestionProvider);
+    }
+
+    /// <summary>
+    /// 从对话框层级里找对话框底图 Image（双策略：特征名优先 + 尺寸过滤兜底）：
+    /// 先排除「全屏级」候选（宽 ≥ 屏 85% 且 高 ≥ 屏 70%——那是对话打开时游戏罩的全屏暗化遮罩，
+    /// 不是对话框本体，截图实证），剩余候选里特征名（dialog/bg/box/frame/window/back/base）
+    /// 优先、同优先级取面积最大者。全部候选（含排除原因）打诊断日志。
+    /// </summary>
+    /// <summary>
+    /// 在 DialogPannel 层级里找「对话正文」文本组件：activeInHierarchy 且屏幕像素面积最大的 TMP。
+    /// 每个候选都打诊断日志（名称/active/canvas rect/屏幕像素尺寸），选错时凭日志校准。
+    /// </summary>
+    private static RectTransform? FindDialogTextArea(DialogPannel? panel)
+    {
+        if (UnityObjectGuard.IsDead(panel)) return null;
+        var log = new StringBuilder();
+        RectTransform? best = null;
+        var bestArea = 0f;
+        foreach (var tmp in panel!.GetComponentsInChildren<TextMeshProUGUI>(true))
+        {
+            if (tmp == null) continue;
+            RectTransform? rt = null;
+            float w = 0f, h = 0f;
+            var active = false;
+            try
+            {
+                rt = tmp.rectTransform;
+                var r = rt.rect;
+                var cv = tmp.canvas;
+                Vector2 bl, tr;
+                if (cv == null || cv.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                {
+                    // Overlay：TransformPoint 的结果即屏幕像素（见 GetOverlayScreenRect 注释）
+                    GetOverlayScreenRect(rt, out bl, out tr);
+                }
+                else
+                {
+                    var cam = cv.rootCanvas.worldCamera;
+                    bl = RectTransformUtility.WorldToScreenPoint(cam,
+                        rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
+                    tr = RectTransformUtility.WorldToScreenPoint(cam,
+                        rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
+                }
+                w = tr.x - bl.x;
+                h = tr.y - bl.y;
+                active = tmp.gameObject.activeInHierarchy;
+                log.Append($"\n  「{tmp.name}」active={active} rect={r.width:F0}x{r.height:F0} " +
+                           $"屏幕={w:F0}x{h:F0} 角0=({bl.x:F0},{bl.y:F0})");
+            }
+            catch (Exception ex)
+            {
+                log.Append($"\n  「{tmp.name}」读取失败: {ex.Message}");
+                continue;
+            }
+            if (!active || w < 100f || h < 30f) { log.Append(" → 跳过"); continue; }
+            var area = w * h;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                best = rt;
+            }
+        }
+        PluginContext.Log.LogInfo(
+            $"[MystiaAI] FreeInputOverlay: 对话文本组件扫描，选中「{(best == null ? "<无>" : best.name)}」：" + log);
+        return best;
+    }
+
+    /// <summary>
+    /// Overlay 画布下求 RectTransform 的屏幕像素矩形（左下/右上）。
+    /// 不用 GetWorldCorners：其「native 回填托管数组」在 IL2CPP 下实测全部返回 (0,0)（日志实证 角0=(0,0)），
+    /// 改用 TransformPoint 逐点换算（实例方法返回值，封送正常）。Overlay 模式下根 Canvas 的缩放
+    /// 由 CanvasScaler 挂在变换上，TransformPoint 的结果直接就是屏幕像素。
+    /// </summary>
+    private static void GetOverlayScreenRect(RectTransform rt, out Vector2 bl, out Vector2 tr)
+    {
+        var r = rt.rect;
+        var p0 = rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f));
+        var p2 = rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f));
+        bl = new Vector2(p0.x, p0.y);
+        tr = new Vector2(p2.x, p2.y);
+    }
+
+    /// <summary>
+    /// 把对话正文 RectTransform 的矩形换算到覆盖层根下的 anchored 位置与尺寸。
+    /// 全程手动换算，不走 RectTransformUtility（其 null cam 路径在 IL2CPP 下失灵）：
+    /// Overlay 的 world corners 即屏幕像素；屏幕像素 → 根 Canvas local 用
+    /// local = (screen - 屏幕中心) / 缩放 + 根rect.center，缩放由 屏幕尺寸/根Canvas rect 推出。
+    /// 失败/尺寸异常返回 false。
+    /// </summary>
+    private static bool TryMatchRect(RectTransform from, RectTransform parent,
+        out Vector2 anchoredPos, out Vector2 size)
+    {
+        anchoredPos = default;
+        size = default;
+        try
+        {
+            if (UnityObjectGuard.IsDead(from) || UnityObjectGuard.IsDead(parent)) return false;
+
+            // 换算目标空间：parent 所在根 Canvas 的 local 单位
+            var rootCanvas = parent.GetComponentInParent<Canvas>();
+            if (rootCanvas == null) return false;
+            rootCanvas = rootCanvas.rootCanvas;
+            var rr = rootCanvas.GetComponent<RectTransform>().rect;
+            if (rr.width < 1f || rr.height < 1f) return false;
+            var sx = Screen.width / rr.width;
+            var sy = Screen.height / rr.height;
+            if (sx <= 0f || sy <= 0f) return false;
+
+            var fromCanvas = from.GetComponentInParent<Canvas>();
+            var overlay = fromCanvas == null ||
+                          fromCanvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay;
+
+            Vector2 bl, tr;
+            if (overlay)
+            {
+                GetOverlayScreenRect(from, out bl, out tr);
+            }
+            else
+            {
+                var r0 = from.rect;
+                var cam = fromCanvas!.rootCanvas.worldCamera;
+                bl = RectTransformUtility.WorldToScreenPoint(cam,
+                    from.TransformPoint(new Vector3(r0.xMin, r0.yMin, 0f)));
+                tr = RectTransformUtility.WorldToScreenPoint(cam,
+                    from.TransformPoint(new Vector3(r0.xMax, r0.yMax, 0f)));
+            }
+
+            // 屏幕像素 → 根 Canvas local（根 rect.center 对应屏幕中心）
+            var half = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            var localBl = new Vector2((bl.x - half.x) / sx, (bl.y - half.y) / sy) + rr.center;
+            var localTr = new Vector2((tr.x - half.x) / sx, (tr.y - half.y) / sy) + rr.center;
+
+            // parent（覆盖层根）锚定在根 Canvas 中心且 scale=1：parent local = 根 local - parent.rect.center
+            var pc = parent.rect.center;
+            localBl -= pc;
+            localTr -= pc;
+
+            size = localTr - localBl;
+            if (size.x < 50f || size.y < 30f) return false;
+            anchoredPos = (localBl + localTr) * 0.5f;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] FreeInputOverlay: 对话框矩形换算失败: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>按钮显示用截断（完整文本照常提交）。按钮约 300 单位宽、字号 22，全角字约 13 个即满。</summary>
     private static string TruncateForButton(string s)
-        => s.Length <= 24 ? s : s.Substring(0, 24) + "…";
+        => s.Length <= 12 ? s : s.Substring(0, 12) + "…";
 
     private static int _pollTicks;
 
@@ -445,23 +769,13 @@ internal sealed class FreeInputOverlay
             PluginContext.Log.LogError($"[MystiaAI] FreeInputOverlay 对话包检测异常（忽略）: {ex}");
         }
 
-        var keyboard = Keyboard.current;
-        if (keyboard != null)
-        {
-            if (keyboard.enterKey.wasPressedThisFrame || keyboard.numpadEnterKey.wasPressedThisFrame)
-            {
-                QueueClose(_input.text);
-                return;
-            }
-            if (keyboard.escapeKey.wasPressedThisFrame)
-            {
-                QueueClose(null);
-                return;
-            }
-        }
+        // 输入聚焦 ⟷ 游戏键盘快捷键屏蔽联动：
+        // 聚焦时禁用 InputSystem 键盘设备（游戏快捷键 J/K/Ctrl/Esc/W 全部静默），失焦/关闭时恢复
+        var focused = _input != null && !UnityObjectGuard.IsDead(_input) && _input.isFocused;
+        SetKeyboardBlocked(focused);
 
-        // 鼠标点击：不订阅 UnityEvent（native → managed thunk 会崩，见 _confirmButton 注释），
-        // 改为轮询左键释放 + RectTransform 命中检测（只读原生调用）
+        // 鼠标点击：不订阅 UnityEvent（native → managed thunk 会崩，见 _regenButton 注释），
+        // 改为轮询左键释放 + RectTransform 命中检测（只读原生调用，全程可靠）
         var mouse = Mouse.current;
         if (mouse == null || !mouse.leftButton.wasReleasedThisFrame) return;
         var pos = mouse.position.ReadValue();
@@ -476,19 +790,70 @@ internal sealed class FreeInputOverlay
                 $"[MystiaAI] FreeInputOverlay: 建议{i + 1} 点击命中（轮询检测），" +
                 (text == null ? "无建议文本，忽略" : $"采用「{TruncateForButton(text)}」"));
             if (text != null)
-                QueueClose(text); // 等价于输入该文本后点确认，走同一 Close 路径
+                QueueClose(text); // 等价于输入该文本后点完成，走同一 Close 路径
             return;
         }
-        if (Hit(_confirmButton, pos))
+        if (Hit(_regenButton, pos))
         {
-            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 确认按钮点击命中（轮询检测）");
+            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 重新生成按钮点击命中（轮询检测）");
+            RegenSuggestions();
+            return;
+        }
+        if (Hit(_doneButton, pos))
+        {
+            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 完成按钮点击命中（轮询检测）");
             QueueClose(_input.text);
             return;
         }
-        if (Hit(_skipButton, pos))
+
+        // 点击输入框本体 → 聚焦进入输入态（用户要求：点击之后才允许输入；
+        // 同时聚焦会联动屏蔽游戏快捷键，见 Poll 前段 SetKeyboardBlocked）
+        if (_input != null && !UnityObjectGuard.IsDead(_input) && !_input.isFocused &&
+            HitRt(_input.GetComponent<RectTransform>(), pos))
         {
-            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 跳过按钮点击命中（轮询检测）");
-            QueueClose(null);
+            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 输入框点击命中，聚焦进入输入态");
+            _input.ActivateInputField();
+        }
+    }
+
+    /// <summary>屏幕坐标是否落在 RectTransform 内（Overlay 体系，相机传 null）。失败一律按未命中。</summary>
+    private static bool HitRt(RectTransform? rt, Vector2 screenPos)
+    {
+        try
+        {
+            if (UnityObjectGuard.IsDead(rt)) return false;
+            return RectTransformUtility.RectangleContainsScreenPoint(rt, screenPos, null);
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogError($"[MystiaAI] FreeInputOverlay.HitRt 异常: {ex}");
+            return false;
+        }
+    }
+
+    /// <summary>输入聚焦期间是否已禁用 InputSystem 键盘设备（屏蔽游戏快捷键）。</summary>
+    private bool _keyboardBlocked;
+
+    /// <summary>
+    /// 禁用/恢复 InputSystem 键盘设备。禁用后游戏的对话快捷键（继续/快进/隐藏/跳过/历史）
+    /// 全部收不到键入；只动设备开关、不碰游戏逻辑，恢复幂等，失败只记日志。
+    /// </summary>
+    private void SetKeyboardBlocked(bool blocked)
+    {
+        if (_keyboardBlocked == blocked) return;
+        try
+        {
+            var kb = Keyboard.current;
+            if (kb == null) return;
+            if (blocked) InputSystem.DisableDevice(kb);
+            else InputSystem.EnableDevice(kb);
+            _keyboardBlocked = blocked;
+            PluginContext.Log.LogInfo(
+                $"[MystiaAI] FreeInputOverlay: {(blocked ? "输入聚焦，已屏蔽游戏键盘快捷键" : "输入失焦/关闭，已恢复游戏键盘")}");
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogError($"[MystiaAI] FreeInputOverlay 键盘屏蔽切换异常: {ex}");
         }
     }
 
@@ -526,6 +891,7 @@ internal sealed class FreeInputOverlay
             $"[MystiaAI] FreeInputOverlay: Close 进入（{(result == null ? "跳过" : "确认")}）");
         if (_closed) return;
         _closed = true;
+        SetKeyboardBlocked(false); // 关闭前务必恢复游戏键盘
         try
         {
             if (!UnityObjectGuard.IsDead(_root))
@@ -560,47 +926,6 @@ internal sealed class FreeInputOverlay
         }
         PluginContext.Log.LogInfo(
             $"[MystiaAI] FreeInputOverlay: 覆盖层已关闭（{(result == null ? "跳过" : "确认")}）");
-    }
-
-    /// <summary>宽条建议按钮（920x46）：返回 Button 并 out 出文本组件，供状态机改文案/置灰。</summary>
-    private Button CreateWideButton(Transform parent, string name, Vector2 pos, TMP_FontAsset? font,
-        string label, out TextMeshProUGUI labelComp)
-    {
-        var go = NewUi(name + "Button", parent, pos, new Vector2(920f, 46f));
-        var img = go.AddComponent<Image>();
-        img.color = new Color(1f, 1f, 1f, 0.9f);
-        var btn = go.AddComponent<Button>();
-        btn.targetGraphic = img;
-
-        var textGo = NewUi("Label", go.transform, Vector2.zero, new Vector2(900f, 46f));
-        var text = textGo.AddComponent<TextMeshProUGUI>();
-        if (font != null) text.font = font;
-        text.text = label;
-        text.fontSize = 24f;
-        text.color = Color.black;
-        text.alignment = TextAlignmentOptions.Center;
-        labelComp = text;
-        return btn;
-    }
-
-    private Button CreateButton(Transform parent, string label, Vector2 pos, TMP_FontAsset? font, System.Action action)
-    {
-        var go = NewUi(label + "Button", parent, pos, new Vector2(200f, 56f));
-        var img = go.AddComponent<Image>();
-        img.color = new Color(1f, 1f, 1f, 0.9f);
-        var btn = go.AddComponent<Button>();
-        btn.targetGraphic = img;
-        // 不订阅 onClick（UnityEvent → managed thunk 会崩，见 _confirmButton 注释）；
-        // action 语义由 Poll 的命中检测执行
-
-        var textGo = NewUi("Label", go.transform, Vector2.zero, new Vector2(200f, 56f));
-        var text = textGo.AddComponent<TextMeshProUGUI>();
-        if (font != null) text.font = font;
-        text.text = label;
-        text.fontSize = 26f;
-        text.color = Color.black;
-        text.alignment = TextAlignmentOptions.Center;
-        return btn;
     }
 
     /// <summary>

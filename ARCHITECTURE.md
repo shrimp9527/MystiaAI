@@ -123,6 +123,12 @@ watcher（Task.WhenAny 超时）→ MainThreadDispatcher.Post 回主线程
 
 ### 4.3 自由输入覆盖层（FreeInputOverlay）
 
+- 视觉原则：不做独立面板——主面板精确覆盖游戏对话框（对话框底图查找=双策略：先排除全屏级候选
+  「宽≥屏85% 且 高≥屏70%」的暗化遮罩——截图实证面积最大策略会命中它导致全屏暗化，再按特征名
+  dialog/bg/box/frame/window/back/base 优先、面积最大兜底，全候选打诊断日志；
+  world corners → screen → 根 Canvas local 换算同位置同尺寸，sprite/type/color 能复刻就复刻），
+  找不到回退固定布局并记 Warning；布局=上方透明输入区（米白居中 + 占位提示「说点什么…」）、
+  右上「重新生成推荐回复」、底部两个并排建议按钮（深色底米白字）；无确认/跳过按钮（Enter=发送，Esc=跳过）
 - 挂 RootCanvas 下，siblingIndex 插在游戏指针「Cursor」节点前（否则遮鼠标）
 - 字体取 DialogPannel.context.font，中文 IME 可用
 - **按钮不用 UnityEvent**（见 5.1），Poll 里轮询 `Mouse.current.leftButton.wasReleasedThisFrame` + `RectangleContainsScreenPoint` 命中检测

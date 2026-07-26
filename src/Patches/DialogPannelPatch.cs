@@ -578,7 +578,9 @@ internal static class DialogPannelPatch
             var original = dialogContext;
             try
             {
-                dialogContext = Placeholder;
+                // 覆盖层打开期间对话框正文留白（空格而非「……」）：覆盖层面板已改为全透明，
+                // 若显示占位符会透过面板与输入区文字重叠；关闭时 SetContent 会覆写本句。
+                dialogContext = " ";
                 FreeInputOverlay.Open(panel, result =>
                 {
                     // 主线程回调（经 Update 通道延迟执行）
