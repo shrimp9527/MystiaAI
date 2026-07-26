@@ -17,15 +17,15 @@
 
 - 游戏：Steam 版《东方夜雀食堂》（Unity 2021.3.28f1，IL2CPP 后端）
 - 系统：Windows x64
-- 加载器：BepInEx 6 IL2CPP 版（BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785 或更新的 bleeding edge 构建）
+- 加载器：BepInEx 6 IL2CPP 版（BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785 或更新的 bleeding edge 构建，[官方下载页](https://builds.bepinex.dev/projects/bepinex_be)）
 - AI 服务：任一 OpenAI 兼容的 chat completions 接口，需自备 API Key
   - 内置预设：DeepSeek（默认）、OpenAI、GLM、月之暗面、Claude
   - 选择 Custom 可接入本地模型（如 Ollama、LM Studio 的兼容端点）
 
 ## 安装
 
-1. 下载 BepInEx 6 IL2CPP 版，解压到游戏根目录，运行一次游戏让其完成初始化
-2. 从 [Releases](https://github.com/shrimp9527/MystiaAI/releases) 下载 `MystiaAI.dll`，放入 `游戏根目录/BepInEx/plugins/`
+1. 下载 BepInEx 6 IL2CPP 版（[BepInEx 官方构建下载页](https://builds.bepinex.dev/projects/bepinex_be)，选择 `BepInEx-Unity.IL2CPP-win-x64` 开头的压缩包），解压到游戏根目录，运行一次游戏让其完成初始化
+2. 从 [Releases](https://github.com/shrimp9527/MystiaAI/releases) 下载 `MystiaAI.dll`（[最新版直链](https://github.com/shrimp9527/MystiaAI/releases/latest/download/MystiaAI.dll)），放入 `游戏根目录/BepInEx/plugins/`
 3. 从 Steam 启动游戏（请保持 Steam 客户端在后台运行，直接双击 exe 可能因 Steam API 初始化失败而闪退）
 4. 首次触发 AI 对话后，配置文件生成于 `文档/MystiaAI/`，在 `settings.json` 中填入 API Key 即可
 
