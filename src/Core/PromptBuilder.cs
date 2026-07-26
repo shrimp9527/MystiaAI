@@ -178,7 +178,7 @@ public static class PromptBuilder
                 sceneDesc = "你们在户外偶遇闲聊（不是营业时间，不在居酒屋里）";
                 break;
             case ChatScene.NightChat:
-                sceneDesc = "夜晚营业中，你在米斯蒂娅的居酒屋里";
+                sceneDesc = "夜晚营业中，你在米斯蒂娅的夜雀食堂里";
                 break;
             case ChatScene.Evaluation:
                 sceneDesc = "夜晚营业中，你刚在居酒屋吃完料理";
