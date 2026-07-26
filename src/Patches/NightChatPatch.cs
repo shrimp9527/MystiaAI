@@ -153,7 +153,7 @@ internal static class NightChatPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (string.IsNullOrWhiteSpace(__result)) return;
             if (!IsNightWorkPhase()) return; // 启动加载期/非营业场景一律不碰 IL2CPP
 
@@ -174,7 +174,7 @@ internal static class NightChatPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (string.IsNullOrWhiteSpace(__result)) return;
             if (!IsNightWorkPhase()) return; // 启动加载期/非营业场景一律不碰 IL2CPP（PeekOrders 崩过）
 
@@ -233,6 +233,9 @@ internal static class NightChatPatch
     private static void RegisterPending(string characterKey, int characterId, ChatScene scene,
         string original, Transform? speaker, string? dish, string? rating)
     {
+        // 学习 stringId → 中文名 别名（仅稀客走本 Patch，失败自动停用，不影响流程）
+        SpecialGuestNames.LearnAlias(PluginContext.Personas, characterKey, characterId);
+
         var extra = new Dictionary<string, string>
         {
             ["characterKey"] = characterKey,
@@ -250,7 +253,7 @@ internal static class NightChatPatch
             GameTime = DialogPannelPatch.GetGameTimeText(),
             Language = DialogPannelPatch.GetCurrentLanguage(),
             KizunaLevel = GetKizunaLevel(characterKey),
-            MaxLength = PluginContext.Settings.MaxLength.Value,
+            MaxLength = PluginContext.Settings.MaxLength,
             Extra = extra,
         };
 
@@ -273,7 +276,7 @@ internal static class NightChatPatch
     /// <summary>异步等待生成结果（复刻 DialogPannelPatch.StartWatcher 模式），尘埃落定回主线程终态化。</summary>
     private static void StartWatcher(PendingBubble pending)
     {
-        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds.Value;
+        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds;
         _ = Task.Run(async () =>
         {
             string? aiText = null;

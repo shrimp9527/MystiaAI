@@ -453,7 +453,7 @@ internal sealed class FreeInputOverlay
             IReadOnlyList<string>? result = null;
             try
             {
-                var timeout = Task.Delay(TimeSpan.FromSeconds(Math.Max(0.1f, PluginContext.Settings.TimeoutSeconds.Value)));
+                var timeout = Task.Delay(TimeSpan.FromSeconds(Math.Max(0.1f, PluginContext.Settings.TimeoutSeconds)));
                 var task = provider(CancellationToken.None);
                 var finished = await Task.WhenAny(task, timeout).ConfigureAwait(false);
                 if (finished == task && task.IsCompletedSuccessfully)

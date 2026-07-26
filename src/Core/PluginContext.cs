@@ -12,7 +12,18 @@ namespace MystiaAI.Core;
 /// </summary>
 public static class PluginContext
 {
-    public static Settings Settings { get; private set; } = null!;
+    private static Settings _settings = null!;
+
+    /// <summary>配置（每次访问按文件修改时间热重载，节流 2 秒，网页工具保存后即时生效）。</summary>
+    public static Settings Settings
+    {
+        get
+        {
+            _settings.ReloadIfChanged();
+            return _settings;
+        }
+    }
+
     public static IAiClient AiClient { get; private set; } = null!;
     public static PersonaStore Personas { get; private set; } = null!;
     public static ManualLogSource Log { get; private set; } = null!;
@@ -23,11 +34,11 @@ public static class PluginContext
     public static void Initialize(ConfigFile config, ManualLogSource log)
     {
         Log = log;
-        Settings = new Settings(config);
+        _settings = Settings.LoadOrCreate(config, log);
         Personas = new PersonaStore(log);
 
         // ApiKey 为空说明用户还没配置真实供应商，退回假 AI 保证替换通道可联调
-        UseFakeAi = string.IsNullOrWhiteSpace(Settings.ApiKey.Value);
+        UseFakeAi = string.IsNullOrWhiteSpace(Settings.ApiKey);
         if (UseFakeAi)
         {
             AiClient = new FakeAiClient();
@@ -37,8 +48,8 @@ public static class PluginContext
 
         var (baseUrl, model) = ResolveEndpoint(Settings);
         AiClient = new OpenAiCompatibleClient(
-            baseUrl, Settings.ApiKey.Value, model, Settings.TimeoutSeconds.Value, Personas);
-        Log.LogInfo($"[MystiaAI] AI 供应商：{Settings.Provider.Value}，BaseUrl={baseUrl}，Model={model}");
+            baseUrl, Settings.ApiKey, model, Settings.TimeoutSeconds, Personas);
+        Log.LogInfo($"[MystiaAI] AI 供应商：{Settings.Provider}，BaseUrl={baseUrl}，Model={model}");
     }
 
     /// <summary>
@@ -47,11 +58,11 @@ public static class PluginContext
     /// </summary>
     private static (string BaseUrl, string Model) ResolveEndpoint(Settings settings)
     {
-        var baseUrl = settings.BaseUrl.Value;
-        var model = settings.Model.Value;
+        var baseUrl = settings.BaseUrl;
+        var model = settings.Model;
 
-        if (!string.Equals(settings.Provider.Value, "Custom", StringComparison.OrdinalIgnoreCase)
-            && ProviderPresets.All.TryGetValue(settings.Provider.Value, out var preset))
+        if (!string.Equals(settings.Provider, "Custom", StringComparison.OrdinalIgnoreCase)
+            && ProviderPresets.All.TryGetValue(settings.Provider, out var preset))
         {
             if (baseUrl == Settings.DefaultBaseUrl)
                 baseUrl = preset.BaseUrl;

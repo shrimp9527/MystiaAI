@@ -18,6 +18,11 @@
     <Compile Remove="decomp/**/*.cs" />
   </ItemGroup>
 
+  <!-- 内置默认人设（116 条，由 tools/build_personas_default.py 生成） -->
+  <ItemGroup>
+    <EmbeddedResource Include="src/Assets/personas.default.json" />
+  </ItemGroup>
+
   <!-- BepInEx 核心与 Il2CppInterop 运行时（由游戏目录提供，不随插件分发） -->
   <ItemGroup>
     <Reference Include="$(BepInExDir)\core\*.dll">

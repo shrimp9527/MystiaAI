@@ -145,7 +145,7 @@ internal static class NightBubblePatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             var f = ++_frame;
             if (f < StartupWarmupFrames || f % (NeedsBoost() ? BoostFrameInterval : FrameInterval) != 0) return;
             if (_insideFrame) return; // 防重入：帧回调读游戏数据意外触发重入时直接跳过
@@ -426,7 +426,7 @@ internal static class NightBubblePatch
 
         // 普通客人：开关关闭时保持原文（稀客不受此开关影响）
         var normal = controller.TryCast<NormalGuestsController>();
-        if (normal == null || !PluginContext.Settings.NormalGuestAiEnabled.Value)
+        if (normal == null || !PluginContext.Settings.NormalGuestAiEnabled)
         {
             PluginContext.Log.LogInfo(
                 $"[MystiaAI] NightBubble: 气泡属普通客人，跳过 文本「{Truncate(text)}」");
@@ -705,11 +705,17 @@ internal static class NightBubblePatch
     {
         try
         {
+            // 学习 stringId → 中文名 别名（仅稀客；失败自动停用，不影响流程）
+            if (isSpecial)
+                SpecialGuestNames.LearnAlias(PluginContext.Personas, characterKey, characterId);
+
             var extra = new Dictionary<string, string>
             {
                 ["characterKey"] = characterKey,
                 ["location"] = "夜晚居酒屋营业中",
                 ["news"] = NewspaperReader.GetTodayNewsSummary(),
+                // 人设分类：普客走 NormalGuest 分类人设，稀客走角色专属/SpecialGuest 兜底
+                ["personaCategory"] = isSpecial ? PersonaStore.CategorySpecialGuest : PersonaStore.CategoryNormalGuest,
             };
             if (!string.IsNullOrWhiteSpace(dish)) extra["dish"] = dish;
             if (!string.IsNullOrWhiteSpace(rating)) extra["rating"] = rating;
@@ -722,7 +728,7 @@ internal static class NightBubblePatch
                 GameTime = DialogPannelPatch.GetGameTimeText(),
                 Language = DialogPannelPatch.GetCurrentLanguage(),
                 KizunaLevel = isSpecial ? GetKizunaLevel(characterKey) : 0,
-                MaxLength = PluginContext.Settings.MaxLength.Value,
+                MaxLength = PluginContext.Settings.MaxLength,
                 Extra = extra,
             };
 
@@ -786,7 +792,7 @@ internal static class NightBubblePatch
             else
             {
                 // 普通客人同样享受预生成（受开关控制）
-                if (!PluginContext.Settings.NormalGuestAiEnabled.Value) return;
+                if (!PluginContext.Settings.NormalGuestAiEnabled) return;
                 var normal = controller.TryCast<NormalGuestsController>();
                 if (normal == null) return;
                 var identity = FindNormalGuestIdentity(normal);
@@ -835,7 +841,7 @@ internal static class NightBubblePatch
     /// <summary>异步等待生成结果（复刻 DialogPannelPatch.StartWatcher 模式），尘埃落定回主线程终态化。</summary>
     private static void StartWatcher(PendingBubble pending)
     {
-        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds.Value;
+        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds;
         _ = Task.Run(async () =>
         {
             string? aiText = null;

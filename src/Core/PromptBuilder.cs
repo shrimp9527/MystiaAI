@@ -26,6 +26,18 @@ public sealed class ChatMessage
 public static class PromptBuilder
 {
     /// <summary>
+    /// 全局扮演规则（来自用户的「调用说明」）：随 system prompt 一并发给模型，
+    /// 约束台词风格与输出格式；角色档案与原版台词范本在 persona 资料里提供。
+    /// </summary>
+    private const string RoleplayRules =
+        "扮演规则：" +
+        "1.贴合原作风格，不OOC，不使用网络流行语；" +
+        "2.台词贴合角色性格，使用短句和口语；" +
+        "3.人设资料中包含该角色的档案与原版点餐/评价对话范本，" +
+        "参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；" +
+        "4.仅输出角色台词本身，不含旁白、引号与额外说明。";
+
+    /// <summary>
     /// NPC 台词生成：system 为角色扮演指令，user 为场景上下文。
     /// Extra 同时带 transcript（完整对话原文）与 targetOriginal（要改写的那句）时，
     /// 走「多段对话连贯改写」路径；否则保持单句场景模式（营业闲聊/评价等）。
@@ -37,8 +49,8 @@ public static class PromptBuilder
 
         var system =
             $"你正在扮演《东方夜雀食堂》中的角色 {context.CharacterName}。{persona}。" +
-            $"以该角色的口吻说一句话。要求：使用{language}；不超过{max}字；" +
-            "只输出台词本身，不要引号/解释/旁白。";
+            RoleplayRules +
+            $"以该角色的口吻说一句话。要求：使用{language}；不超过{max}字。";
 
         // 多段对话改写：Patch 层传入整段原文，只改写属于当前角色的那一句
         if (context.Extra.TryGetValue("transcript", out var transcript) && !string.IsNullOrWhiteSpace(transcript)

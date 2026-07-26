@@ -270,7 +270,7 @@ internal static class DialogPannelPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (__instance == null) return;
 
             var package = __instance.OpenContext?.DialogPackageToPlay;
@@ -384,7 +384,7 @@ internal static class DialogPannelPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (__instance == null) return;
             if (string.IsNullOrEmpty(dialogContext)) return;
             if (!Active.TryGetValue(__instance, out var active) || active == null) return;
@@ -464,7 +464,7 @@ internal static class DialogPannelPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (__instance == null) return;
             if (!Active.TryGetValue(__instance, out var active) || active == null) return;
 
@@ -654,7 +654,7 @@ internal static class DialogPannelPatch
                 CharacterName = active.Replacement.CharacterKey,
                 GameTime = GetGameTimeText(),
                 Language = GetCurrentLanguage(),
-                MaxLength = PluginContext.Settings.MaxLength.Value,
+                MaxLength = PluginContext.Settings.MaxLength,
                 Extra = new Dictionary<string, string>
                 {
                     // 没有过去对话时 transcript 为空串；未定型 NPC 句过滤掉（快进连点可能多句 pending）
@@ -742,7 +742,7 @@ internal static class DialogPannelPatch
 
     private static void StartWatcher(DialogPannel panel, ActiveReplacement active, LineEntry entry)
     {
-        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds.Value;
+        var timeoutSeconds = PluginContext.Settings.TimeoutSeconds;
         _ = Task.Run(async () =>
         {
             string? aiText = null;
@@ -834,7 +834,7 @@ internal static class DialogPannelPatch
             CharacterName = active.Replacement.CharacterKey,
             GameTime = GetGameTimeText(),
             Language = GetCurrentLanguage(),
-            MaxLength = PluginContext.Settings.MaxLength.Value,
+            MaxLength = PluginContext.Settings.MaxLength,
             // 与 PromptBuilder 的契约：给了这两个键就走连贯改写 prompt
             Extra = new Dictionary<string, string>
             {

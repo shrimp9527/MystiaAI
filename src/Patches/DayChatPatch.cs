@@ -23,7 +23,7 @@ internal static class DayChatPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return;
+            if (!PluginContext.Settings.Enabled) return;
             if (__result == null) return;
 
             var metas = __result.dialogMeta;

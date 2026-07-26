@@ -169,14 +169,24 @@ public sealed class OpenAiCompatibleClient : IAiClient
     /// <summary>
     /// 角色内部名（characterKey）：优先取 Extra["characterKey"]（Patches 层若能拿到内部名会塞这里），
     /// 否则退化为显示名——英文语言下恰好与内部名一致。
+    /// 分类：优先 Extra["personaCategory"]（如夜晚普客标记 NormalGuest），否则按场景推断。
     /// </summary>
     private string GetPersona(GenerationContext context)
     {
         var key = context.Extra.TryGetValue("characterKey", out var k) && !string.IsNullOrWhiteSpace(k)
             ? k
             : context.CharacterName;
-        return _personas.GetPersona(key);
+        var category = context.Extra.TryGetValue("personaCategory", out var c) && !string.IsNullOrWhiteSpace(c)
+            ? c
+            : CategoryFromScene(context.Scene);
+        return _personas.GetPersona(key, category);
     }
+
+    private static string CategoryFromScene(ChatScene scene) => scene switch
+    {
+        ChatScene.DayChat => PersonaStore.CategoryDayNpc,
+        _ => PersonaStore.CategorySpecialGuest, // NightChat / Evaluation 默认按稀客兜底
+    };
 
     private async Task<string> PostChatAsync(
         IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream, CancellationToken cancellationToken)

@@ -39,7 +39,7 @@ internal static class OpenDialogMenuPatch
     {
         try
         {
-            if (!PluginContext.Settings.Enabled.Value) return true;
+            if (!PluginContext.Settings.Enabled) return true;
             if (dialogPackage == null) return true;
             if (overrideReplaceTextCallback != null) return true; // 游戏/其他 mod 已提供回调，不覆盖
             if (!PendingReplacementStore.Contains(dialogPackage)) return true;
