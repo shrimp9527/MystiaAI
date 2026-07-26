@@ -9,8 +9,8 @@
 
 已确认的需求边界：
 
-- **要替换**：白天地图上 NPC 闲聊（含玩家自由输入 + AI 回复选项）、营业中稀客闲聊、上菜后稀客评价语
-- **不碰**：剧情对话、羁绊升级对话、稀客顶仓（bark）气泡、点单对话、普通客人评价
+- **要替换**：白天地图上 NPC 闲聊（含玩家自由输入 + AI 回复选项）、营业中稀客闲聊、上菜后稀客评价语、营业中普通客人闲聊+评价（`General.NormalGuestAiEnabled` 开关，默认开）
+- **不碰**：剧情对话、羁绊升级对话、稀客顶仓（bark）气泡、点单对话
 - AI 每次重新生成；失败/超时回退原文（评价语计划加角落灰色小字标注，未做）
 - 上下文：人设（personas.json）、羁绊等级、场景、游戏内时间、当日报纸流行情报、评价语另加菜品名+等级
 - 配置：DeepSeek 等 OpenAI 兼容 API（key 在 BepInEx 配置文件）；后续要做网页配置 GUI（端口 8520）、流式显示——均未开始
@@ -94,11 +94,21 @@ AI 回调 → MainThreadDispatcher.Post（纯托管队列）
 - 显示：`GuestsManager` 协程 → `ShowTargetDialog` → `NightScene.UI.GuestManagementUtility.DialogBoxUI` 气泡（评价用子类 `EvalulationBoxUI`，5 套皮肤）
 
 **正式实现（NightBubblePatch，纯安全锚点，零夜场景 patch）**：帧泵挂在 DialogPannelPatch 的
-EventSystem.Update postfix 同链，每 30 帧：相位闸门（Work/BeforeChallengeStart/Challenge/YuyukoStageChange）
-→ 轮询 `GuestsManager.AllPresentedGuestGroupController`（HasEvaluated 翻转检测 + PeekOrders 提前缓存菜品）
-→ `FindObjectsOfType<DialogBoxUI>(true)` 扫气泡 → 甄别（评价=EvalulationBoxUI+翻转窗口内+皮肤 sprite 反推等级；
-闲聊=followTarget 反查稀客+SpecialConversation 池命中）→ 登记生成 → watcher 超时兜底
-→ MainThreadDispatcher.Post 回主线程 → 气泡活着且文本仍是原文 → tmp.text 原地改写。
+EventSystem.Update postfix 同链，平时每 30 帧（评价翻转窗口存活或有未决 Pending 时提频 5 帧）：
+相位闸门（Work/BeforeChallengeStart/Challenge/YuyukoStageChange）
+→ 轮询 `GuestsManager.AllPresentedGuestGroupController`（HasEvaluated 翻转检测 + PeekOrders 提前缓存菜品；
+**翻转当刻即登记评价预生成**——控制器上没有存储本次 EvaluationResult 的字段（evaluationType 只是
+PostEvaluation 闭包局部变量），rating 此刻读不到故 prompt 降级不带；预生成等不到气泡由
+EvictStaleAwaitingEval 按窗口过期/控制器离场淘汰）
+→ `FindObjectsOfType<DialogBoxUI>(true)` 扫气泡 → 甄别（评价=EvalulationBoxUI+翻转窗口内，优先认领预生成：
+AI 已就绪则当帧直接改写无原文闪现，未就绪写占位符「……」，无预生成则新登记+占位符+皮肤 sprite 反推等级；
+闲聊=followTarget 反查客人+闲聊池命中：稀客 SpecialConversation / 普客 NormalConversation，普客受
+NormalGuestAiEnabled 开关控制、身份取组内首个可读 NormalGuest 的 Text.Name+Id、人设自动落 Default、羁绊固定 0，
+登记后同样写占位符）
+→ watcher 超时兜底 → MainThreadDispatcher.Post 回主线程 → 气泡活着且文本仍是原文**或占位符** → tmp.text
+原地改写；生成失败则占位符还原原文（原文是天然回退态）。
+改写成功登记 RewrittenTexts（指针→AI 文本），下一轮扫描认出自己的改写文本直接跳过（防「未命中池/疑似 bark」误报；
+文本不等说明气泡被复用，删条目照常甄别；随 SeenBubbles 按轮淘汰）。
 数据通路细节与证据见 docs/game-api.md 第 G 章。
 
 旧方案（NightChatPatch，postfix 直接挂取数点）因启动闪退根因已永久下线，仅作参考保留：
@@ -118,6 +128,9 @@ watcher（Task.WhenAny 超时）→ MainThreadDispatcher.Post 回主线程
 - **按钮不用 UnityEvent**（见 5.1），Poll 里轮询 `Mouse.current.leftButton.wasReleasedThisFrame` + `RectangleContainsScreenPoint` 命中检测
 - 会话结束三重检测：面板销毁 / `gameObject.activeInHierarchy==false` / `OpenContext.DialogPackageToPlay==null`，任一命中 QueueClose 静默关闭（防快进残留）
 - Poll 的泵在 EventSystem.Update postfix（不依赖面板存亡）；Close 经 dispatcher 延迟执行，OnGUI 内不做原生写
+- 建议按钮的 transcript 只保留已定型 NPC 句（懒生成 `LineEntry.FinalText != null`）；最近一句 NPC 台词
+  未定型（占位符阶段被快进，FinalizeLine 翻页早退永不落 FinalText）→ 不发起建议生成，
+  按钮显示「未进行对话」且不可点（interactable=false + 建议文本为 null 双保险，绝不会误提交为玩家回复）
 
 ## 5. IL2CPP + Harmony 血泪教训（审查者必须逐条核对）
 

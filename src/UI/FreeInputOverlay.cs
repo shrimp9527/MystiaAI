@@ -59,18 +59,22 @@ internal sealed class FreeInputOverlay
     private readonly TextMeshProUGUI[] _suggestionLabels = new TextMeshProUGUI[2];
     private readonly string?[] _suggestions = new string?[2];
 
+    /// <summary>建议整体不可用时的按钮文案（默认「建议不可用」；NPC 前句 AI 未生成时传「未进行对话」）。</summary>
+    private readonly string _unavailableText;
+
     /// <summary>
     /// 打开覆盖层。onClosed 在主线程回调：参数为玩家输入/采用的建议（确认）或 null（跳过）。
     /// panel 用于取字体与定位游戏 UI 根 Canvas。
-    /// suggestionProvider：异步取 2 条 AI 建议（null 则建议按钮直接置为不可用）。
+    /// suggestionProvider：异步取 2 条 AI 建议（null 则不发起生成，按钮直接置为不可用，文案用 unavailableText）。
     /// </summary>
     public static void Open(DialogPannel panel, Action<string?> onClosed,
-        Func<CancellationToken, Task<IReadOnlyList<string>>>? suggestionProvider = null)
+        Func<CancellationToken, Task<IReadOnlyList<string>>>? suggestionProvider = null,
+        string unavailableText = "建议不可用")
     {
         // 防御：已有实例先按「跳过」关掉，避免叠加
         if (_current != null)
             _current.Close(null);
-        _current = new FreeInputOverlay(panel, onClosed, suggestionProvider);
+        _current = new FreeInputOverlay(panel, onClosed, suggestionProvider, unavailableText);
         PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 输入覆盖层已打开");
     }
 
@@ -88,10 +92,11 @@ internal sealed class FreeInputOverlay
     }
 
     private FreeInputOverlay(DialogPannel panel, Action<string?> onClosed,
-        Func<CancellationToken, Task<IReadOnlyList<string>>>? suggestionProvider)
+        Func<CancellationToken, Task<IReadOnlyList<string>>>? suggestionProvider, string unavailableText)
     {
         _onClosed = onClosed;
         _panel = panel;
+        _unavailableText = unavailableText;
 
         TMP_FontAsset? font = null;
         Step("取字体", () =>
@@ -366,7 +371,9 @@ internal sealed class FreeInputOverlay
             for (var i = 0; i < _suggestionButtons.Length; i++)
             {
                 if (UnityObjectGuard.IsDead(_suggestionButtons[i]) || UnityObjectGuard.IsDead(_suggestionLabels[i])) continue;
-                _suggestionLabels[i].text = "建议不可用";
+                // 不可点（Poll 命中检测跳过 interactable=false 的按钮）且 _suggestions 保持 null，
+                // 双保险保证「未进行对话」/「建议不可用」文案绝不会被当成玩家回复提交
+                _suggestionLabels[i].text = _unavailableText;
                 _suggestionButtons[i].interactable = false;
             }
         }

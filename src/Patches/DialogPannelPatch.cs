@@ -603,7 +603,8 @@ internal static class DialogPannelPatch
                     {
                         PluginContext.Log.LogError($"[MystiaAI] Self 段写回异常: {ex}");
                     }
-                }, BuildSuggestionProvider(active, selfEntry));
+                }, BuildSuggestionProvider(active, selfEntry, out var lastNpcPending),
+                    lastNpcPending ? "未进行对话" : "建议不可用");
             }
             catch (Exception ex)
             {
@@ -620,18 +621,31 @@ internal static class DialogPannelPatch
 
     /// <summary>
     /// 组装 AI 建议的 provider：context 带截至当前 Self 句的实际 transcript（Extra["transcript"]），
-    /// npcLine = 最近一句 NPC 台词原文。PromptBuilder 由另一代理同步适配，这里只负责组装。
+    /// npcLine = 最近一句 NPC 台词原文。
+    /// 最近一句 NPC 台词 AI 还没生成出来时（lastNpcPending=true 传出）：不发起建议生成（返回 null），
+    /// 调用方把建议按钮置为「未进行对话」；transcript 一律过滤未定型 NPC 句（原版绝不进上下文）。
     /// 注意：provider 会在线程池执行，而 context 组装涉及 IL2CPP 调用（时钟/报纸），
     /// 跨线程 interop 是 .NET Runtime 内部错误（event 1023）的典型成因——
     /// 因此全部数据在调用方（主线程）预取，provider 闭包只引用已取好的托管字符串。
     /// </summary>
-    private static Func<CancellationToken, Task<IReadOnlyList<string>>> BuildSuggestionProvider(
-        ActiveReplacement active, SelfLineEntry selfEntry)
+    private static Func<CancellationToken, Task<IReadOnlyList<string>>>? BuildSuggestionProvider(
+        ActiveReplacement active, SelfLineEntry selfEntry, out bool lastNpcPending)
     {
+        lastNpcPending = false;
         GenerationContext context;
         string npcLine;
         try
         {
+            // 判定用懒生成状态机的实际状态（FinalText），不看文本内容
+            lastNpcPending = IsLastNpcLinePending(active, selfEntry.DialogId);
+            if (lastNpcPending)
+            {
+                PluginContext.Log.LogInfo(
+                    $"[MystiaAI] DialogPannel: Self 段 dialogId={selfEntry.DialogId} 的上一句 NPC 台词 " +
+                    "AI 文本尚未生成（占位符阶段被推进），不发起建议生成，按钮显示「未进行对话」");
+                return null;
+            }
+
             context = new GenerationContext
             {
                 Scene = ChatScene.DayChat,
@@ -641,8 +655,8 @@ internal static class DialogPannelPatch
                 MaxLength = PluginContext.Settings.MaxLength.Value,
                 Extra = new Dictionary<string, string>
                 {
-                    // 没有过去对话时 transcript 为空串
-                    ["transcript"] = BuildActualTranscript(active, selfEntry.DialogId),
+                    // 没有过去对话时 transcript 为空串；未定型 NPC 句过滤掉（快进连点可能多句 pending）
+                    ["transcript"] = BuildActualTranscript(active, selfEntry.DialogId, skipUnsettledNpc: true),
                     ["characterKey"] = active.Replacement.CharacterKey,
                     ["location"] = "户外白天地图",
                     ["news"] = NewspaperReader.GetTodayNewsSummary(),
@@ -653,7 +667,7 @@ internal static class DialogPannelPatch
         catch (Exception ex)
         {
             PluginContext.Log.LogError($"[MystiaAI] BuildSuggestionProvider 预取异常（返回空建议）: {ex}");
-            return _ => Task.FromResult<IReadOnlyList<string>>(new List<string>());
+            return null;
         }
 
         context.Extra.TryGetValue("news", out var newsText);
@@ -832,8 +846,13 @@ internal static class DialogPannelPatch
         };
     }
 
-    /// <summary>截至 beforeDialogId（不含）的实际对话 transcript，逐行「说话人：台词」。</summary>
-    private static string BuildActualTranscript(ActiveReplacement active, int beforeDialogId)
+    /// <summary>
+    /// 截至 beforeDialogId（不含）的实际对话 transcript，逐行「说话人：台词」。
+    /// skipUnsettledNpc=true 时（建议生成路径）跳过 AI 还没生成出来的 NPC 句——
+    /// 那句实际显示的是占位符，喂原版进上下文会和已 AI 化的前文对不上。
+    /// </summary>
+    private static string BuildActualTranscript(ActiveReplacement active, int beforeDialogId,
+        bool skipUnsettledNpc = false)
     {
         var protagonist = ProtagonistName(GetCurrentLanguage());
         var lines = new List<string>();
@@ -856,12 +875,39 @@ internal static class DialogPannelPatch
             else
             {
                 var text = original;
-                if (active.NpcByDialogId.TryGetValue(segment.DialogId, out var npc) && npc.FinalText != null)
-                    text = npc.FinalText; // 实际显示的 AI 文本（失败时已落为原文）
+                if (active.NpcByDialogId.TryGetValue(segment.DialogId, out var npc))
+                {
+                    if (npc.FinalText == null)
+                    {
+                        // 未定型（生成中/占位符阶段被快进，FinalizeLine 翻页早退永不落 FinalText）
+                        if (skipUnsettledNpc) continue;
+                    }
+                    else
+                    {
+                        text = npc.FinalText; // 实际显示的 AI 文本（失败时已落为原文）
+                    }
+                }
                 lines.Add($"{active.Replacement.CharacterKey}：{text}");
             }
         }
         return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// beforeDialogId 之前最近一句 NPC 台词是否还未定型（AI 生成中/占位符阶段被推进）。
+    /// 判定用懒生成状态机的 FinalText（已替换/失败回退都会落值），不看文本内容。
+    /// </summary>
+    private static bool IsLastNpcLinePending(ActiveReplacement active, int beforeDialogId)
+    {
+        var lastId = -1;
+        foreach (var segment in active.Replacement.Segments)
+        {
+            if (segment.DialogId == beforeDialogId) break;
+            if (!segment.IsSelf && active.Originals.ContainsKey(segment.DialogId))
+                lastId = segment.DialogId;
+        }
+        if (lastId < 0) return false; // 前面没有 NPC 句（开场即玩家回合）
+        return active.NpcByDialogId.TryGetValue(lastId, out var entry) && entry.FinalText == null;
     }
 
     /// <summary>beforeDialogId 之前最近一句 NPC 台词原文（AI 建议的 npcLine 参数）。</summary>

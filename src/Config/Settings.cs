@@ -15,6 +15,7 @@ public sealed class Settings
     public const string DefaultModel = "deepseek-v4-flash";
 
     public ConfigEntry<bool> Enabled { get; }
+    public ConfigEntry<bool> NormalGuestAiEnabled { get; }
     public ConfigEntry<string> Provider { get; }
     public ConfigEntry<string> ApiKey { get; }
     public ConfigEntry<string> BaseUrl { get; }
@@ -27,6 +28,7 @@ public sealed class Settings
     public Settings(ConfigFile config)
     {
         Enabled = config.Bind("General", "Enabled", true, "总开关：是否启用 AI 文本替换");
+        NormalGuestAiEnabled = config.Bind("General", "NormalGuestAiEnabled", true, "普通客人气泡是否也用 AI 生成（闲聊+评价）；false 时普通客人保持原文（稀客不受此开关影响）");
         Provider = config.Bind("AI", "Provider", "DeepSeek", "AI 供应商：OpenAI / DeepSeek / GLM / Moonshot / Claude / Custom（本地）");
         ApiKey = config.Bind("AI", "ApiKey", "", "API Key");
         BaseUrl = config.Bind("AI", "BaseUrl", DefaultBaseUrl, "API 地址（本地模型填 Ollama 等地址）");
