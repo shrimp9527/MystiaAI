@@ -10,7 +10,7 @@ using BepInEx.Logging;
 namespace MystiaAI.Config;
 
 /// <summary>
-/// 全部可调参数的单一入口。持久化后端是独立 JSON：<游戏根目录>/MystiaAI/settings.json——
+/// 全部可调参数的单一入口。持久化后端是独立 JSON：文档目录/MystiaAI/settings.json——
 /// 网页配置工具与用户手动编辑的都是这同一份文件，不再使用 BepInEx cfg。
 /// 首次启动时若存在旧 cfg（cc.mystia.ai.cfg）则一次性迁移其值后弃用（cfg 文件不删除）。
 /// 访问前按文件修改时间热重载（节流 2 秒），网页保存后游戏内即时生效。
@@ -23,8 +23,12 @@ public sealed class Settings
     /// <summary>Model 全局默认值，用途同 <see cref="DefaultBaseUrl"/>。与 DeepSeek 当前支持的模型名保持一致。</summary>
     public const string DefaultModel = "deepseek-v4-flash";
 
-    /// <summary>配置文件夹（游戏根目录下新建的 MystiaAI 文件夹，用户可见、网页工具也指向这里）。</summary>
-    public static readonly string StoreDir = Path.Combine(Paths.GameRootPath, "MystiaAI");
+    /// <summary>
+    /// 配置文件夹（文档目录下的 MystiaAI 文件夹）。
+    /// 不能放游戏根目录：游戏装在 Program Files 时 Chrome 禁止网页工具访问该位置。
+    /// </summary>
+    public static readonly string StoreDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "MystiaAI");
 
     public static readonly string StoreFile = Path.Combine(StoreDir, "settings.json");
 
@@ -64,6 +68,7 @@ public sealed class Settings
         var s = new Settings(log);
         try
         {
+            ConfigMigration.EnsureMigrated(log);
             if (!File.Exists(StoreFile))
             {
                 s.ImportLegacyCfg(legacyCfg);
@@ -175,5 +180,39 @@ public sealed class Settings
         [JsonPropertyName("maxLength")] public int? MaxLength { get; set; }
         [JsonPropertyName("streaming")] public bool? Streaming { get; set; }
         [JsonPropertyName("timeoutSeconds")] public float? TimeoutSeconds { get; set; }
+    }
+}
+
+/// <summary>
+/// 配置目录迁移：旧位置是 游戏根目录/MystiaAI，但游戏装在 Program Files 时
+/// Chrome 的目录选择器禁止访问该位置（网页工具无法读写），故整体迁到文档目录。
+/// 旧文件一次性复制到新位置（不覆盖新文件、不删除旧文件），之后只用新位置。
+/// </summary>
+internal static class ConfigMigration
+{
+    private static readonly string LegacyStoreDir = Path.Combine(Paths.GameRootPath, "MystiaAI");
+    private static bool _done;
+
+    public static void EnsureMigrated(ManualLogSource? log = null)
+    {
+        if (_done) return;
+        _done = true;
+        try
+        {
+            if (!Directory.Exists(LegacyStoreDir)) return;
+            foreach (var name in new[] { "settings.json", "personas.json", "aliases.json" })
+            {
+                var src = Path.Combine(LegacyStoreDir, name);
+                var dst = Path.Combine(Settings.StoreDir, name);
+                if (!File.Exists(src) || File.Exists(dst)) continue;
+                Directory.CreateDirectory(Settings.StoreDir);
+                File.Copy(src, dst);
+                log?.LogInfo($"[MystiaAI] 配置已迁移到文档目录：{name}");
+            }
+        }
+        catch (Exception ex)
+        {
+            log?.LogWarning($"[MystiaAI] 配置目录迁移失败（使用文档目录默认值）: {ex.Message}");
+        }
     }
 }

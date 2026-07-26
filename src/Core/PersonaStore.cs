@@ -6,11 +6,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BepInEx;
 using BepInEx.Logging;
+using MystiaAI.Config;
 
 namespace MystiaAI.Core;
 
 /// <summary>
-/// NPC 人设存储（v2）。持久化在 <游戏根目录>/MystiaAI/personas.json，结构：
+/// NPC 人设存储（v2）。持久化在 文档目录/MystiaAI/personas.json（与 settings.json 同目录，
+/// 不在游戏根目录——游戏装在 Program Files 时 Chrome 禁止网页工具访问），结构：
 /// {
 ///   "_meta": { "tool": "MystiaAI", "kind": "personas", "version": "2" },
 ///   "categories": { "Default": "…", "DayNpc": "…", "NormalGuest": "…", "SpecialGuest": "…" },
@@ -42,7 +44,7 @@ public sealed class PersonaStore
     /// <summary>未配置占位符：用户后续在网页工具里逐一替换为正式人设。</summary>
     public const string Placeholder = "【待填写】";
 
-    private static readonly string StoreDir = Path.Combine(Paths.GameRootPath, "MystiaAI");
+    private static readonly string StoreDir = Settings.StoreDir;
     private static readonly string StoreFile = Path.Combine(StoreDir, "personas.json");
     private static readonly string AliasStoreFile = Path.Combine(StoreDir, "aliases.json");
 
@@ -165,6 +167,7 @@ public sealed class PersonaStore
     private Dictionary<string, string> EnsureAliasesLoaded()
     {
         if (_aliases != null) return _aliases;
+        ConfigMigration.EnsureMigrated(_log);
         var aliases = new Dictionary<string, string>();
         try
         {
@@ -252,6 +255,7 @@ public sealed class PersonaStore
         if (_file != null) return _file;
         try
         {
+            ConfigMigration.EnsureMigrated(_log);
             if (!File.Exists(StoreFile))
             {
                 // 一次性迁移 v1 旧文件（扁平字典），没有则写内置默认
