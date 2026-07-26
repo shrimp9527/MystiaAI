@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>MystiaAI</AssemblyName>
+    <RootNamespace>MystiaAI</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- 游戏安装目录，可在构建时用 /p:GameDir=... 覆盖 -->
+    <GameDir Condition="'$(GameDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Touhou Mystia Izakaya</GameDir>
+    <BepInExDir>$(GameDir)\BepInEx</BepInExDir>
+  </PropertyGroup>
+
+  <!-- 反编译参考产物不参与编译 -->
+  <ItemGroup>
+    <Compile Remove="decomp/**/*.cs" />
+  </ItemGroup>
+
+  <!-- BepInEx 核心与 Il2CppInterop 运行时（由游戏目录提供，不随插件分发） -->
+  <ItemGroup>
+    <Reference Include="$(BepInExDir)\core\*.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Il2CppInterop 生成的游戏互操作程序集（首次启动游戏时生成） -->
+  <ItemGroup>
+    <Reference Include="$(BepInExDir)\interop\*.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 构建完成后自动部署到游戏插件目录，方便直接进游戏测试 -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="Exists('$(BepInExDir)\plugins')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BepInExDir)\plugins" />
+    <Message Text="Deployed MystiaAI.dll to $(BepInExDir)\plugins" Importance="high" />
+  </Target>
+
+</Project>

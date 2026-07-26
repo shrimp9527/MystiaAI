@@ -1,0 +1,6 @@
+bin/
+obj/
+tools/
+*.user
+.vs/
+decomp/
