@@ -173,6 +173,8 @@
     <div class="field"><label>超时时间（秒）</label><input type="number" id="s_timeout" min="1" max="120" step="0.5"></div>
     <div class="field"><label>流式显示（默认关）</label><input type="checkbox" id="s_streaming"></div>
     <div class="hint">开启后游戏内边生成边显示；不稳定，建议保持关闭</div>
+    <div class="field"><label>报纸话题频率（<span id="s_newsFreqVal">30</span>%）</label><input type="range" id="s_newsFrequency" min="0" max="100" step="5"></div>
+    <div class="hint">AI 闲聊时引用当日《文文新闻》的概率；0 为完全不提，100 为每次都提</div>
   </div>
 
   <!-- ============ 角色设定 ============ -->
@@ -834,6 +836,7 @@ function defaultSettings() {
     "provider": "DeepSeek", "apiKey": "",
     "baseUrl": DEFAULT_BASE_URL, "model": DEFAULT_MODEL,
     "maxLength": 50, "streaming": false, "timeoutSeconds": 10,
+    "newsFrequency": 30,
   };
 }
 
@@ -1070,6 +1073,8 @@ function fillSettingsForm() {
   $("s_maxLength").value = d.maxLength ?? 50;
   $("s_timeout").value = d.timeoutSeconds ?? 10;
   $("s_streaming").checked = d.streaming === true;
+  $("s_newsFrequency").value = d.newsFrequency ?? 30;
+  $("s_newsFreqVal").textContent = d.newsFrequency ?? 30;
 }
 
 function collectSettingsForm() {
@@ -1084,6 +1089,7 @@ function collectSettingsForm() {
     maxLength: parseInt($("s_maxLength").value, 10) || 50,
     timeoutSeconds: parseFloat($("s_timeout").value) || 10,
     streaming: $("s_streaming").checked,
+    newsFrequency: Math.min(100, Math.max(0, parseInt($("s_newsFrequency").value, 10) || 0)),
   });
   settingsState.data._meta = { tool: "MystiaAI", kind: "settings", version: "1" };
 }
@@ -1102,8 +1108,9 @@ $("s_provider").addEventListener("change", () => {
   }
   markDirty(settingsState);
 });
-for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_streaming"])
+for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_streaming","s_newsFrequency"])
   $(id).addEventListener("change", () => markDirty(settingsState));
+$("s_newsFrequency").addEventListener("input", () => { $("s_newsFreqVal").textContent = $("s_newsFrequency").value; });
 
 /* ================= 角色设定页 ================= */
 function normalizePersonas() {

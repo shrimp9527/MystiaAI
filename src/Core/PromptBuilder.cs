@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -152,14 +153,21 @@ public static class PromptBuilder
 
     /// <summary>
     /// 当日《文文新闻》剪报段（Extra["news"]，空串=未解锁/无数据）。
-    /// 非空时返回「新闻行 + 软性引导」，供三条路径插在情境行之后；
-    /// 为空时返回空串，行为与不传该键完全一致。
+    /// 非空时按 Settings.NewsFrequency（百分比）的概率返回「新闻行 + 软性引导」，
+    /// 供三条路径插在情境行之后；掷骰未中或为空时返回空串，行为与不传该键完全一致。
     /// 引导语刻意用「可以」「不要每句都提」的分寸，避免模型句句带报纸。
     /// </summary>
     private static string BuildNewsSection(GenerationContext context)
     {
         if (!context.Extra.TryGetValue("news", out var news) || string.IsNullOrWhiteSpace(news))
             return string.Empty;
+        // 按配置概率注入，避免 AI 高频提及报纸；Random.Shared 线程安全
+        var freq = Math.Clamp(PluginContext.Settings.NewsFrequency, 0, 100);
+        if (freq < 100 && Random.Shared.Next(100) >= freq)
+        {
+            PluginContext.Log.LogInfo($"[MystiaAI] 报纸话题本次未注入（频率 {freq}%）");
+            return string.Empty;
+        }
         return
             $"今日《文文新闻》剪报：{news}\n" +
             "可以自然地把报纸内容当作闲聊话题，但不要每句都提。\n";

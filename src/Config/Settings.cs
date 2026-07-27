@@ -48,6 +48,9 @@ public sealed class Settings
     public bool Streaming { get; set; } = false;
     public float TimeoutSeconds { get; set; } = 10f;
 
+    /// <summary>报纸话题注入概率（百分比 0-100）：AI 闲聊时把当日《文文新闻》塞进提示词的概率，0=完全不提，100=每次都提。</summary>
+    public int NewsFrequency { get; set; } = 30;
+
     private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
         WriteIndented = true,
@@ -136,6 +139,7 @@ public sealed class Settings
         MaxLength = MaxLength,
         Streaming = Streaming,
         TimeoutSeconds = TimeoutSeconds,
+        NewsFrequency = NewsFrequency,
     };
 
     private void ReadFrom(string json)
@@ -151,6 +155,7 @@ public sealed class Settings
         if (dto.MaxLength.HasValue) MaxLength = dto.MaxLength.Value;
         if (dto.Streaming.HasValue) Streaming = dto.Streaming.Value;
         if (dto.TimeoutSeconds.HasValue) TimeoutSeconds = dto.TimeoutSeconds.Value;
+        if (dto.NewsFrequency.HasValue) NewsFrequency = Math.Clamp(dto.NewsFrequency.Value, 0, 100);
     }
 
     /// <summary>从旧 BepInEx cfg 读取同名字段（只读不写；文件不存在时 Bind 会给默认值，正好当出厂值）。</summary>
@@ -165,6 +170,7 @@ public sealed class Settings
         MaxLength = cfg.Bind("AI", "MaxLength", 50).Value;
         Streaming = cfg.Bind("AI", "Streaming", false).Value;
         TimeoutSeconds = cfg.Bind("AI", "TimeoutSeconds", 10f).Value;
+        NewsFrequency = cfg.Bind("AI", "NewsFrequency", 30).Value;
         // WebPort 已废弃（网页改为纯静态页，不再有本地服务），不迁移
     }
 
@@ -180,6 +186,7 @@ public sealed class Settings
         [JsonPropertyName("maxLength")] public int? MaxLength { get; set; }
         [JsonPropertyName("streaming")] public bool? Streaming { get; set; }
         [JsonPropertyName("timeoutSeconds")] public float? TimeoutSeconds { get; set; }
+        [JsonPropertyName("newsFrequency")] public int? NewsFrequency { get; set; }
     }
 }
 
