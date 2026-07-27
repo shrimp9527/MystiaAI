@@ -58,7 +58,9 @@
 - [ilspycmd](https://github.com/icsharpcode/ILSpy)（MIT）：开发期用于分析 Il2CppInterop 生成的程序集存根，梳理游戏 API
 
 ## 参考与致谢
+- 第一原作：ZUN@上海アリス幻樂団
 
+- 第二原作：东方夜雀食堂 / Touhou Mystia’s Izakaya
 - [MetaMystia](https://github.com/MetaMikuAI/MetaMystia)：同为《东方夜雀食堂》的模组项目，其源码为本项目理解游戏内部 API 提供了重要佐证
 - 角色人设资料整理自 THBWiki 与游戏内文本
 - 本项目（游戏 AI 角色设定集）在制作过程中使用了以下网站
