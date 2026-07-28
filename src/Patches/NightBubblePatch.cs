@@ -460,6 +460,9 @@ internal static class NightBubblePatch
                     $"保持原文 角色={characterKey} 文本「{Truncate(text)}」");
                 return;
             }
+            // 一次翻转只认一条评价：认领成功立即关闭窗口（-2=已消费），
+            // 防止同窗口内的符卡 bark（与吃饭评价共用 EvalulationBoxUI）被误判为第二条评价
+            state.EvalFlippedFrame = -2;
             var rating = RatingFromSkin(evalBox);
 
             // 优先认领翻转时登记的预生成任务
@@ -633,7 +636,12 @@ internal static class NightBubblePatch
         return PoolContains(pool, guestId, text);
     }
 
-    /// <summary>普客闲聊池成员性判定（NormalConversation）：对组内每个普通客人 Id 都试一次。</summary>
+    /// <summary>
+    /// 普客闲聊池成员性判定（NormalConversation）。
+    /// 池的 key 是 convGroup 值而非客人 Id（NormalGuest.GenerateRandomConvMessage 用
+    /// this.convGroup.RandomSelectOne() 取文本，MystiaReverse NormalGuest.cs:256-258）——
+    /// 对组内每个客人的每个 ConvGroupValue 都试一次。
+    /// </summary>
     private static bool IsNormalIdleChatText(NormalGuestsController controller, string text)
     {
         Il2CppSystem.Collections.Generic.Dictionary<int, Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<StructPtrString>>? pool;
@@ -652,16 +660,20 @@ internal static class NightBubblePatch
         foreach (var g in guests)
         {
             if (g == null) continue;
-            int id;
+            int[]? convGroups;
             try
             {
-                id = g.Id;
+                convGroups = g.ConvGroupValue;
             }
             catch
             {
                 continue;
             }
-            if (PoolContains(pool, id, text)) return true;
+            if (convGroups == null) continue;
+            foreach (var convGroup in convGroups)
+            {
+                if (PoolContains(pool, convGroup, text)) return true;
+            }
         }
         return false;
     }
