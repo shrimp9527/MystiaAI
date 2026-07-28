@@ -51,6 +51,12 @@ public sealed class Settings
     /// <summary>报纸话题注入概率（百分比 0-100）：AI 闲聊时把当日《文文新闻》塞进提示词的概率，0=完全不提，100=每次都提。</summary>
     public int NewsFrequency { get; set; } = 30;
 
+    /// <summary>玩家输入提到「报纸/新闻」等关键词时，强制注入报纸内容（保证 AI 能就报纸作答）；关闭后只按 NewsFrequency 概率注入。</summary>
+    public bool NewsKeywordTrigger { get; set; } = true;
+
+    /// <summary>生成温度（0-2）：越低越稳定越守规矩，越高越发散；默认 0.8。</summary>
+    public float Temperature { get; set; } = 0.8f;
+
     private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
         WriteIndented = true,
@@ -140,6 +146,8 @@ public sealed class Settings
         Streaming = Streaming,
         TimeoutSeconds = TimeoutSeconds,
         NewsFrequency = NewsFrequency,
+        NewsKeywordTrigger = NewsKeywordTrigger,
+        Temperature = Temperature,
     };
 
     private void ReadFrom(string json)
@@ -156,6 +164,8 @@ public sealed class Settings
         if (dto.Streaming.HasValue) Streaming = dto.Streaming.Value;
         if (dto.TimeoutSeconds.HasValue) TimeoutSeconds = dto.TimeoutSeconds.Value;
         if (dto.NewsFrequency.HasValue) NewsFrequency = Math.Clamp(dto.NewsFrequency.Value, 0, 100);
+        if (dto.NewsKeywordTrigger.HasValue) NewsKeywordTrigger = dto.NewsKeywordTrigger.Value;
+        if (dto.Temperature.HasValue) Temperature = Math.Clamp(dto.Temperature.Value, 0f, 2f);
     }
 
     /// <summary>从旧 BepInEx cfg 读取同名字段（只读不写；文件不存在时 Bind 会给默认值，正好当出厂值）。</summary>
@@ -171,6 +181,8 @@ public sealed class Settings
         Streaming = cfg.Bind("AI", "Streaming", false).Value;
         TimeoutSeconds = cfg.Bind("AI", "TimeoutSeconds", 10f).Value;
         NewsFrequency = cfg.Bind("AI", "NewsFrequency", 30).Value;
+        NewsKeywordTrigger = cfg.Bind("AI", "NewsKeywordTrigger", true).Value;
+        Temperature = cfg.Bind("AI", "Temperature", 0.8f).Value;
         // WebPort 已废弃（网页改为纯静态页，不再有本地服务），不迁移
     }
 
@@ -187,6 +199,8 @@ public sealed class Settings
         [JsonPropertyName("streaming")] public bool? Streaming { get; set; }
         [JsonPropertyName("timeoutSeconds")] public float? TimeoutSeconds { get; set; }
         [JsonPropertyName("newsFrequency")] public int? NewsFrequency { get; set; }
+        [JsonPropertyName("newsKeywordTrigger")] public bool? NewsKeywordTrigger { get; set; }
+        [JsonPropertyName("temperature")] public float? Temperature { get; set; }
     }
 }
 

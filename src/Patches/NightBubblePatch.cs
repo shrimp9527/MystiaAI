@@ -943,7 +943,8 @@ internal static class NightBubblePatch
         try
         {
             RunTimeAlbum.GetCharacterKizuna(characterKey, out _, out var level);
-            return level;
+            // 未收录的角色返回 -1（RunTimeAlbum.GetCharacterKizuna 语义），按未知=0 处理
+            return level < 0 ? 0 : level;
         }
         catch (Exception ex)
         {

@@ -20,8 +20,8 @@ namespace MystiaAI.Core;
 /// </summary>
 public sealed class OpenAiCompatibleClient : IAiClient
 {
-    /// <summary>生成温度，按需求固定 0.9。</summary>
-    private const double Temperature = 0.9;
+    /// <summary>温度从配置读取（热重载即时生效）；仅作序列化兜底的是 Settings 里的默认值 0.8。</summary>
+    private static double Temperature => PluginContext.Settings.Temperature;
 
     // 静态复用，避免每请求新建导致套接字耗尽；超时分摊到每请求的 CancellationToken 上
     private static readonly HttpClient Http = new HttpClient
@@ -61,6 +61,9 @@ public sealed class OpenAiCompatibleClient : IAiClient
     public async Task<string> GenerateAsync(GenerationContext context, CancellationToken cancellationToken = default)
     {
         var messages = PromptBuilder.BuildMessages(context, GetPersona(context));
+        // 诊断：记录实际发给模型的 user 消息（场景/transcript/报纸全在里面），排查「AI 不知道上下文」用
+        PluginContext.Log.LogInfo(
+            $"[MystiaAI] AI 请求（{context.Scene}/{context.CharacterName}）user 消息：\n{messages[messages.Count - 1].Content}");
         // max_tokens 要留足余量：deepseek-v4 等带思考链的模型会先消耗推理 token，
         // 卡太死会导致正文还没输出就被截断（表现为"AI 返回内容为空"）
         var maxTokens = Math.Max(512, EffectiveMaxLength(context) * 4);

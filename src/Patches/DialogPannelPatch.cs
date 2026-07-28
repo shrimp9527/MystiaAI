@@ -191,6 +191,15 @@ internal static class DialogPannelPatch
                 postfix: null);
         }
 
+        // 对话历史面板（Move/Scroll 滚轮触发，无参方法，不在上面的 CallbackContext 名单里）：
+        // 覆盖层打开期间拦截，防止打字时滚轮弹出历史面板遮挡输入框
+        PatchMethod(
+            harmony,
+            targetName: "OpenHistoryPanel",
+            match: parameters => parameters.Length == 0,
+            prefix: nameof(GuardWhileOverlayOpen),
+            postfix: null);
+
         DumpAllPatchedMethods();
     }
 
@@ -844,8 +853,30 @@ internal static class DialogPannelPatch
                 ["location"] = "户外白天地图",
                 // 文文新闻当日剪报（流行情报等），未解锁/无数据为空串，prompt 侧判空
                 ["news"] = NewspaperReader.GetTodayNewsSummary(),
+                // 玩家输入提到报纸/新闻关键词时强制注入（AI 得知道内容才接得上话）；
+                // 否则不传此键，按 NewsFrequency 概率注入
+                ["newsForce"] = PlayerMentionedNews(active) ? "1" : "0",
             },
         };
+    }
+
+    /// <summary>报纸关键词（中日英韩）：玩家输入命中即认为在谈论报纸。</summary>
+    private static readonly string[] NewsKeywords = { "报纸", "報紙", "新闻", "新聞", "news", "신문" };
+
+    /// <summary>本次对话中玩家是否提到过报纸（配置开启关键词触发且输入命中）。</summary>
+    private static bool PlayerMentionedNews(ActiveReplacement active)
+    {
+        if (!PluginContext.Settings.NewsKeywordTrigger) return false;
+        foreach (var kv in active.PlayerInputs)
+        {
+            var v = kv.Value;
+            if (string.IsNullOrEmpty(v)) continue;
+            foreach (var kw in NewsKeywords)
+            {
+                if (v.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -931,12 +962,13 @@ internal static class DialogPannelPatch
 
     /// <summary>
     /// 真实游戏时间文本（prompt 的时间锚点）。internal：NightChatPatch（营业气泡）复用。
-    /// 白天（GamePhase.Day 系）：读 DayScene.UI.UIManager.Instance.currentTime——
-    /// MonoSingleton 单例左上角时钟的 TMP 文本（如 "10:30"），拼成「白天 10:30」；
-    /// 时钟读取失败降级为「白天」并打 Warning。其余阶段按 RunTimeScheduler.CurrentGamePhase
-    /// 给粗粒度文本（准备中/营业中/结算中）。出处：decomp/DayScene_UI_UIManager.cs
-    /// （UIManager : MonoSingleton&lt;UIManager&gt;，currentTime 字段）、
-    /// decomp/GameData_RunTime_Common_RunTimeScheduler.cs（GamePhase 枚举）。
+    /// 白天（GamePhase.Day 系）：调 DayScene.UI.UIManager.Instance.GetTimeCode(CurrentActions)——
+    /// 与左上角时钟同一个公式（按剩余行动数在 startTime~endTime 间 Lerp，格式 "hh:mm"），
+    /// 比读时钟 TMP 文本更准（无 UI 动画过渡滞后）；拼成「白天 10:30」。
+    /// 读取失败降级为「白天」并打 Warning。其余阶段按 RunTimeScheduler.CurrentGamePhase
+    /// 给粗粒度文本（准备中/营业中/结算中）。出处：MystiaReverse/DayScene/UI/UIManager.cs
+    /// （GetTimeCode:255、CurrentActions:50）、
+    /// MystiaReverse/GameData/RunTime/Common/RunTimeScheduler.cs（GamePhase 枚举）。
     /// </summary>
     internal static string GetGameTimeText()
     {
@@ -950,8 +982,12 @@ internal static class DialogPannelPatch
                 case GameData.RunTime.Common.RunTimeScheduler.GamePhase.DayToPreperation:
                     try
                     {
-                        var clock = DayScene.UI.UIManager.Instance?.currentTime?.text;
-                        if (!string.IsNullOrEmpty(clock)) return $"白天 {clock}";
+                        var ui = DayScene.UI.UIManager.Instance;
+                        if (ui != null)
+                        {
+                            var time = ui.GetTimeCode(ui.CurrentActions);
+                            if (!string.IsNullOrEmpty(time)) return $"白天 {time}";
+                        }
                     }
                     catch (Exception ex)
                     {
