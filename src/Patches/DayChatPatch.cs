@@ -26,6 +26,10 @@ internal static class DayChatPatch
             if (!PluginContext.Settings.Enabled) return;
             if (__result == null) return;
 
+            // 首次对话时一次性预建全量稀客别名表（白天是最早的对话场景；
+            // 白天 NPC 人设查找也走 stringId → 中文名 别名换算）
+            SpecialGuestNames.EnsurePrebuilt(PluginContext.Personas);
+
             var metas = __result.dialogMeta;
             if (metas == null || metas.Length == 0) return;
 

@@ -19,7 +19,7 @@ namespace MystiaAI.UI;
 /// 自由输入覆盖层：轮到米斯蒂娅（Self）的台词时弹出。
 /// 视觉原则：不做独立面板——主面板精确覆盖游戏对话框（同位置/同尺寸/同底色，底图 sprite 能复刻就复刻），
 /// 看起来就是对话框本身：上半区透明背景输入区（米白大字居中 + 灰色占位提示），
-/// 右上角并排的「重新生成推荐回复」与「完成」小按钮，底部两个并排的 AI 建议按钮（深色底米白字）；
+/// 右上角并排的「结束对话」「重新生成推荐回复」与「完成」小按钮，底部两个并排的 AI 建议按钮（深色底米白字）；
 /// 提交只走鼠标点击（完成/建议按钮）——键盘 Enter/Esc 检测在本环境多条通道均不可靠，已移除。
 /// 层级策略：不做独立的 ScreenSpaceOverlay（实测被游戏对话框压住），
 /// 而是挂到 DialogPannel 所在的根 Canvas 之下，siblingIndex 插在游戏指针节点前，保证渲染在对话框之上且射线不被挡。
@@ -55,6 +55,9 @@ internal sealed class FreeInputOverlay
 
     /// <summary>「完成」按钮引用（点击检测用，命中后提交输入框文本，等价于回车发送）。</summary>
     private Button? _doneButton;
+
+    /// <summary>「结束对话」按钮引用（点击检测用，命中后关闭覆盖层并干净终止整段对话）。</summary>
+    private Button? _exitButton;
 
     /// <summary>打开时传入的建议 provider（「重新生成推荐回复」复用再跑一遍）。</summary>
     private Func<CancellationToken, Task<IReadOnlyList<string>>>? _suggestionProvider;
@@ -295,11 +298,12 @@ internal sealed class FreeInputOverlay
         if (panelTf == null) return; // 背景都失败就不再往下建，避免半残 UI
 
         // ---- 布局度量（相对面板：输入区=正文矩形即上方打字区，其下并排两个建议按钮，
-        //      正文右上角两个并排小按钮：重新生成 + 完成）----
+        //      正文右上角三个并排小按钮：结束对话 + 重新生成 + 完成）----
         const float gap = 10f;
         var regenSize = new Vector2(160f, 30f);
         var doneSize = new Vector2(64f, 30f);
-        Vector2 inputPos, inputSize, regenPos, donePos;
+        var exitSize = new Vector2(96f, 30f);
+        Vector2 inputPos, inputSize, regenPos, donePos, exitPos;
         float suggY, suggW, suggH;
         if (matched)
         {
@@ -320,11 +324,15 @@ internal sealed class FreeInputOverlay
             regenPos = new Vector2(
                 donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
                 donePos.y);
+            exitPos = new Vector2(
+                regenPos.x - regenSize.x / 2f - 8f - exitSize.x / 2f,
+                donePos.y);
             // 换算为相对面板中心
             suggY = suggCenterY - panelPos.y;
             inputPos -= panelPos;
             regenPos -= panelPos;
             donePos -= panelPos;
+            exitPos -= panelPos;
         }
         else
         {
@@ -341,6 +349,9 @@ internal sealed class FreeInputOverlay
                 panelSize.y / 2f - pad - doneSize.y / 2f);
             regenPos = new Vector2(
                 donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
+                donePos.y);
+            exitPos = new Vector2(
+                regenPos.x - regenSize.x / 2f - 8f - exitSize.x / 2f,
                 donePos.y);
         }
 
@@ -382,7 +393,12 @@ internal sealed class FreeInputOverlay
         Step("创建建议按钮2", () => CreateSuggestionButton(panelTf, 1,
             new Vector2((suggW + gap) / 2f, suggY), new Vector2(suggW, suggH), font));
 
-        // ---- 右上角并排小按钮：重新生成推荐回复 + 完成（提交输入）----
+        // ---- 右上角并排小按钮：结束对话 + 重新生成推荐回复 + 完成（提交输入）----
+        Step("创建结束对话按钮", () =>
+        {
+            _exitButton = CreateStyledButton(panelTf, "结束对话", exitPos, exitSize, font,
+                "结束对话", 18f, out _);
+        });
         Step("创建重新生成按钮", () =>
         {
             _regenButton = CreateStyledButton(panelTf, "重新生成", regenPos, regenSize, font,
@@ -799,6 +815,17 @@ internal sealed class FreeInputOverlay
             RegenSuggestions();
             return;
         }
+        if (Hit(_exitButton, pos))
+        {
+            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 结束对话按钮点击命中（轮询检测）");
+            QueueClose(null); // 本句按跳过处理（显示原文），随后终止整段对话
+            // Close 经 Update 通道执行完后置终止标记（FIFO 保证顺序）：
+            // fastForwardMode 解锁当前句等待，shouldInterrupt 让对话循环下一轮直接结束，
+            // 剩余句子不播、不进历史；面板走游戏正常关闭流程（两标记下次打开自动复位）
+            var panel = _panel;
+            MainThreadDispatcher.Post(() => EndConversation(panel));
+            return;
+        }
         if (Hit(_doneButton, pos))
         {
             PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 完成按钮点击命中（轮询检测）");
@@ -883,6 +910,28 @@ internal sealed class FreeInputOverlay
         if (_closed || _closeQueued) return;
         _closeQueued = true;
         MainThreadDispatcher.Post(() => Close(result));
+    }
+
+    /// <summary>
+    /// 「结束对话」：对当前对话面板置 fastForwardMode + shouldInterrupt 双标记——
+    /// fastForwardMode 让当前句的等待立即通过（DialogPannel.WaitForNextLine），
+    /// shouldInterrupt 让主循环下一轮迭代直接 yield break（游戏自留口子，原生从未使用），
+    /// 剩余句子不播、不进历史、不放音效，随后面板走游戏正常关闭流程（onChatFinished 链路完整）。
+    /// 两字段在面板下次打开时由游戏自行复位，无副作用。失败只记日志（对话将照常继续）。
+    /// </summary>
+    private static void EndConversation(DialogPannel? panel)
+    {
+        try
+        {
+            if (UnityObjectGuard.IsDead(panel)) return;
+            panel!.fastForwardMode = true;
+            panel.shouldInterrupt = true;
+            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 已置终止标记，对话将在当前句后结束");
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] FreeInputOverlay: 结束对话置位失败（对话将照常继续）: {ex.Message}");
+        }
     }
 
     private void Close(string? result)

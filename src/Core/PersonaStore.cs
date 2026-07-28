@@ -20,7 +20,7 @@ namespace MystiaAI.Core;
 /// }
 /// 角色条目以【中文名】为 key（与普客运行时 key 一致，也便于网页工具编辑）。
 /// 稀客/白天 NPC 运行时拿到的是内部英文名（stringId，如 "Chen"），由 aliases.json
-/// （stringId → 中文名）在查找时换算；别名表夜晚遇到稀客时自动学习补全。
+/// （stringId → 中文名）在查找时换算；别名表在首次对话时按游戏数据一次性预建补全。
 /// 生效优先级：角色专属（精确 key → 别名换算）→ 分类 → Default → 内置默认。
 /// 人设为空或仍是占位符「【待填写】」视为未配置，继续向上回退。
 /// 内置默认（116 条全量人设）内嵌于 DLL 资源 personas.default.json；
@@ -102,6 +102,12 @@ public sealed class PersonaStore
             {
                 if (file.Characters.TryGetValue(characterKey, out var entry) && IsUsable(entry.Persona))
                     return entry.Persona;
+                // label（stringId）直接匹配：条目上配置的 stringId 与运行时 key 一致即命中
+                foreach (var (_, e) in file.Characters)
+                {
+                    if (!string.IsNullOrEmpty(e.Label) && e.Label == characterKey && IsUsable(e.Persona))
+                        return e.Persona;
+                }
                 // stringId → 中文名 别名换算（稀客/白天 NPC 路径）
                 var cn = ResolveAlias(characterKey);
                 if (cn != null
@@ -130,29 +136,68 @@ public sealed class PersonaStore
     /* ================= 别名表（stringId → 中文名） ================= */
 
     /// <summary>
-    /// 记录一条别名（稀客出现时由 Patches 层调用，带 id→本地化名的查询结果）。
-    /// 已有相同映射时直接跳过；新增/变化才写盘（文件极小，遇到即写）。
+    /// 批量并入别名（SpecialGuestNames 一次性预建用）：只补缺、不覆盖已有条目
+    /// （含用户手改与预置别名），有新增才写盘一次。
     /// </summary>
-    public void LearnAlias(string stringId, string displayName)
+    public void LearnAliases(IReadOnlyDictionary<string, string> map)
     {
-        if (string.IsNullOrWhiteSpace(stringId) || string.IsNullOrWhiteSpace(displayName)) return;
-        stringId = stringId.Trim();
-        displayName = displayName.Trim();
-        if (stringId == displayName) return;
+        if (map == null || map.Count == 0) return;
         lock (_gate)
         {
             var aliases = EnsureAliasesLoaded();
-            if (aliases.TryGetValue(stringId, out var cur) && cur == displayName) return;
-            aliases[stringId] = displayName;
+            var added = 0;
+            foreach (var (k, v) in map)
+            {
+                if (string.IsNullOrWhiteSpace(k) || string.IsNullOrWhiteSpace(v)) continue;
+                var key = k.Trim();
+                var value = v.Trim();
+                if (key == value || aliases.ContainsKey(key)) continue;
+                aliases[key] = value;
+                added++;
+            }
+            if (added == 0) return;
             try
             {
                 Directory.CreateDirectory(StoreDir);
                 File.WriteAllText(AliasStoreFile, JsonSerializer.Serialize(aliases, JsonOptions));
-                _log?.LogInfo($"[MystiaAI] 别名已记录：{stringId} → {displayName}");
+                _log?.LogInfo($"[MystiaAI] 别名表批量并入 {added} 条（总计 {aliases.Count} 条）");
             }
             catch (Exception ex)
             {
                 _log?.LogWarning($"[MystiaAI] 别名写入失败（仅内存生效）: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 用游戏数据回填角色条目的 label（stringId）与 id：按「条目 key == 当前语言名」匹配，
+    /// 只补缺不覆盖（用户手改的不动）；有改动写回一次。由 SpecialGuestNames 预建别名表后调用。
+    /// </summary>
+    public void BackfillIdentities(IReadOnlyList<(int Id, string Label, string Name)> identities)
+    {
+        if (identities == null || identities.Count == 0) return;
+        lock (_gate)
+        {
+            var file = EnsureLoaded();
+            var changed = 0;
+            foreach (var (id, label, name) in identities)
+            {
+                if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(name)) continue;
+                if (!file.Characters.TryGetValue(name.Trim(), out var entry)) continue;
+                if (string.IsNullOrEmpty(entry.Label)) { entry.Label = label.Trim(); changed++; }
+                if (!entry.Id.HasValue) { entry.Id = id; changed++; }
+            }
+            if (changed == 0) return;
+            try
+            {
+                file.Dirty = false;
+                File.WriteAllText(StoreFile, JsonSerializer.Serialize(file, JsonOptions));
+                _lastWriteUtc = File.GetLastWriteTimeUtc(StoreFile);
+                _log?.LogInfo($"[MystiaAI] personas.json 已回填 label/id（{changed} 处）");
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning($"[MystiaAI] personas.json label/id 回填写盘失败（仅内存生效）: {ex.Message}");
             }
         }
     }
@@ -451,5 +496,11 @@ public sealed class PersonaStore
         [JsonPropertyName("displayName")] public string DisplayName { get; set; } = string.Empty;
         [JsonPropertyName("category")] public string Category { get; set; } = CategorySpecialGuest;
         [JsonPropertyName("persona")] public string Persona { get; set; } = string.Empty;
+
+        /// <summary>内部名（stringId，如 "Wriggle"）。运行时 key 为 stringId 时直接按此匹配，无需走别名表。</summary>
+        [JsonPropertyName("label")] public string? Label { get; set; }
+
+        /// <summary>游戏内数字 id（稀客 id）。仅作展示/参考，查找不使用。</summary>
+        [JsonPropertyName("id")] public int? Id { get; set; }
     }
 }

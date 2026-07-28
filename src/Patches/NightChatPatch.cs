@@ -233,8 +233,8 @@ internal static class NightChatPatch
     private static void RegisterPending(string characterKey, int characterId, ChatScene scene,
         string original, Transform? speaker, string? dish, string? rating)
     {
-        // 学习 stringId → 中文名 别名（仅稀客走本 Patch，失败自动停用，不影响流程）
-        SpecialGuestNames.LearnAlias(PluginContext.Personas, characterKey, characterId);
+        // 首次对话时一次性预建全量稀客别名表（已建则直接返回，失败下次重试，不影响流程）
+        SpecialGuestNames.EnsurePrebuilt(PluginContext.Personas);
 
         var extra = new Dictionary<string, string>
         {

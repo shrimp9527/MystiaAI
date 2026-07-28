@@ -705,9 +705,9 @@ internal static class NightBubblePatch
     {
         try
         {
-            // 学习 stringId → 中文名 别名（仅稀客；失败自动停用，不影响流程）
+            // 首次对话时一次性预建全量稀客别名表（已建则直接返回，失败下次重试，不影响流程）
             if (isSpecial)
-                SpecialGuestNames.LearnAlias(PluginContext.Personas, characterKey, characterId);
+                SpecialGuestNames.EnsurePrebuilt(PluginContext.Personas);
 
             var extra = new Dictionary<string, string>
             {
