@@ -30,6 +30,18 @@ public sealed class PendingReplacement
     public IReadOnlyList<DialogSegment> Segments { get; init; } = new List<DialogSegment>();
 
     /// <summary>
+    /// 跨轮携带的对话记录（自动续聊用）：前几轮的完整 transcript，
+    /// 新一轮生成时拼在本轮 transcript 之前，让 AI 看到整段连续对话。
+    /// </summary>
+    public string CarriedTranscript { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 续聊专用：上一轮以玩家说话收尾时置 true——本轮开头的玩家回合组整组静默略过
+    /// （不弹输入框、不进 transcript），让 NPC 直接承接玩家上句话回应。
+    /// </summary>
+    public bool SkipLeadingSelf { get; set; }
+
+    /// <summary>
     /// 同步语义的替换任务表（兼容保留）：仅 OpenDialogMenuPatch 的旧路径消费。
     /// 白天闲聊的方案 B 异步流程不使用此表（生成任务挂在 DialogPannelPatch 的面板实例上），保持为空即可。
     /// </summary>

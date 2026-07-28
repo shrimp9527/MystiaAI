@@ -924,6 +924,7 @@ internal sealed class FreeInputOverlay
         try
         {
             if (UnityObjectGuard.IsDead(panel)) return;
+            DialogPannelPatch.MarkExitRequested(panel); // 通知自动续聊：本轮播完不再重开
             panel!.fastForwardMode = true;
             panel.shouldInterrupt = true;
             PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 已置终止标记，对话将在当前句后结束");

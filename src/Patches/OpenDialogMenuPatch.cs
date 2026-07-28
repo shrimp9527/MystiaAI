@@ -31,21 +31,63 @@ internal static class OpenDialogMenuPatch
     private static readonly Dictionary<string, Il2CppSystem.Action<Il2CppReplaceDict>> PinnedCallbacks = new();
     private static readonly Dictionary<string, System.Action<Il2CppReplaceDict>> PinnedManaged = new();
 
+    /// <summary>自动续聊：包装后的结束回调钉住表（按包 key）。</summary>
+    private static readonly Dictionary<string, Il2CppSystem.Action> PinnedFinishWrap = new();
+    private static readonly Dictionary<string, System.Action> PinnedFinishWrapManaged = new();
+
+    /// <summary>任何 OpenDialogMenu 调用的最近时刻（含未登记的剧情/事件包），续聊冲突检测用。</summary>
+    internal static System.DateTime LastOpenDialogMenuUtc = System.DateTime.MinValue;
+
+    /// <summary>最近 window 内是否有对话被打开（如羁绊事件接棒），有则续聊让路。</summary>
+    internal static bool RecentlyOpened(System.TimeSpan window)
+        => System.DateTime.UtcNow - LastOpenDialogMenuUtc < window;
+
     private static bool Prefix(
         DialogPackage dialogPackage,
-        Il2CppSystem.Action onFinishCallback,
+        ref Il2CppSystem.Action onFinishCallback,
         ref Il2CppSystem.Action<Il2CppReplaceDict>? overrideReplaceTextCallback,
         AdpUIPanelManager.PanelVisualMode previousPanelVisualMode)
     {
+        LastOpenDialogMenuUtc = System.DateTime.UtcNow; // 无条件记录，含剧情/事件包（续聊冲突检测）
         try
         {
             if (!PluginContext.Settings.Enabled) return true;
             if (dialogPackage == null) return true;
-            if (overrideReplaceTextCallback != null) return true; // 游戏/其他 mod 已提供回调，不覆盖
             if (!PendingReplacementStore.Contains(dialogPackage)) return true;
-            if (!PendingReplacementStore.TryMarkInjected(dialogPackage)) return true; // 防多层级重复链式叠加
 
             var key = PendingReplacementStore.KeyOf(dialogPackage);
+
+            // 自动续聊：包装结束回调，播完一轮后由 DialogContinuation 评估是否重开；
+            // 续聊重开时传入的是我们自己钉的回调，不重复包装
+            if (DialogContinuation.Has(key) && !DialogContinuation.IsOwnFinishCallback(key, onFinishCallback))
+            {
+                var capturedKey = key;
+                var original = onFinishCallback;
+                System.Action managed = () =>
+                {
+                    DialogContinuation.BeginFinish(capturedKey); // 菜单抑制窗口：原回调执行期间有效
+                    try
+                    {
+                        original?.Invoke();
+                    }
+                    catch (System.Exception ex)
+                    {
+                        PluginContext.Log.LogError($"[MystiaAI] OpenDialogMenu: 原结束回调异常（{capturedKey}）: {ex}");
+                    }
+                    finally
+                    {
+                        DialogContinuation.EndFinish();
+                    }
+                    DialogContinuation.OnRoundFinished(capturedKey);
+                };
+                var wrapped = (Il2CppSystem.Action)managed;
+                PinnedFinishWrapManaged[capturedKey] = managed;
+                PinnedFinishWrap[capturedKey] = wrapped;
+                onFinishCallback = wrapped;
+            }
+
+            if (overrideReplaceTextCallback != null) return true; // 游戏/其他 mod 已提供回调，不覆盖
+            if (!PendingReplacementStore.TryMarkInjected(dialogPackage)) return true; // 防多层级重复链式叠加
             if (!PinnedCallbacks.TryGetValue(key, out var callback))
             {
                 var capturedKey = key;

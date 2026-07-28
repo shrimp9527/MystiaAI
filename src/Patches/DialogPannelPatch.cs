@@ -110,6 +110,12 @@ internal static class DialogPannelPatch
 
         /// <summary>当前正在显示的那句（用于任务完成时校验防串句）。</summary>
         public LineEntry? CurrentLine;
+
+        /// <summary>跨轮携带的对话记录（自动续聊）：新一轮开播时从 PendingReplacement 拷入。</summary>
+        public string CarriedTranscript = string.Empty;
+
+        /// <summary>玩家点了「结束对话」：本轮播完后不再自动续聊（DialogContinuation 检查）。</summary>
+        public bool ExitRequested;
     }
 
     /// <summary>手动注册本类的全部 patch，并输出自检日志。任何一步失败都会 LogError。</summary>
@@ -298,7 +304,12 @@ internal static class DialogPannelPatch
             if (replacement == null) return;
 
             // 登记为本面板的生效替换；面板是池化复用的，带包名校验防止串包
-            var active = new ActiveReplacement { PackageKey = packageKey, Replacement = replacement };
+            var active = new ActiveReplacement
+            {
+                PackageKey = packageKey,
+                Replacement = replacement,
+                CarriedTranscript = replacement.CarriedTranscript ?? string.Empty,
+            };
 
             // 面板打开时才有全部原文（textFile）。这里只做数据准备，不发起任何生成任务：
             // NPC 段改为「逐句懒生成」——轮到它播放时（ExecuteDialog prefix）才发起任务，
@@ -319,6 +330,8 @@ internal static class DialogPannelPatch
             var groupId = 0;
             SelfLineEntry? previousSelf = null;
             var groupSizes = new List<int>();
+            var leadingSelfEntries = new List<SelfLineEntry>(); // 开头的连续 Self 段（续聊承接用）
+            var stillLeading = true;
             foreach (var segment in replacement.Segments)
             {
                 if (segment.IsSelf)
@@ -352,10 +365,12 @@ internal static class DialogPannelPatch
                         }
                         active.SelfLines[selfOriginal] = entry;
                         previousSelf = entry;
+                        if (stillLeading) leadingSelfEntries.Add(entry);
                     }
                     continue;
                 }
                 previousSelf = null; // Self 组被 NPC 段打断
+                stillLeading = false;
                 if (!originals.TryGetValue(segment.DialogId, out var original)) continue;
 
                 // 懒生成：只建状态，不发起任务（AiTask 在 ExecuteDialog 命中时才赋值）
@@ -371,6 +386,41 @@ internal static class DialogPannelPatch
 
             Active.Remove(__instance);
             Active.Add(__instance, active);
+
+            // 续聊承接：上一轮以玩家说话收尾时，开头的玩家回合组预置空决策，
+            // 整组静默略过（不弹输入框、不进 transcript），NPC 直接承接玩家上句话回应
+            if (replacement.SkipLeadingSelf && leadingSelfEntries.Count > 0)
+            {
+                foreach (var e in leadingSelfEntries)
+                {
+                    active.GroupDecisions[e.GroupId] = string.Empty;
+                    active.PlayerInputs[e.DialogId] = string.Empty;
+                }
+                PluginContext.Log.LogInfo(
+                    $"[MystiaAI] DialogPannel: 续聊承接——开头 {leadingSelfEntries.Count} 个 Self 段静默略过（上一轮玩家已发言）");
+            }
+
+            // 包尾的玩家回合整组静默略过（所有轮生效）：原包里这句说完对话就结束，没有实际意义；
+            // 略过后每轮必然以 NPC 的话收尾，玩家点击直接进入下一轮/散场
+            var trailingSelfEntries = new List<SelfLineEntry>();
+            for (var i = replacement.Segments.Count - 1; i >= 0; i--)
+            {
+                var seg = replacement.Segments[i];
+                if (!seg.IsSelf) break;
+                if (!originals.TryGetValue(seg.DialogId, out var trailingOriginal)) continue;
+                if (active.SelfLines.TryGetValue(trailingOriginal, out var trailingEntry))
+                    trailingSelfEntries.Add(trailingEntry);
+            }
+            if (trailingSelfEntries.Count > 0)
+            {
+                foreach (var e in trailingSelfEntries)
+                {
+                    active.GroupDecisions[e.GroupId] = string.Empty;
+                    active.PlayerInputs[e.DialogId] = string.Empty;
+                }
+                PluginContext.Log.LogInfo(
+                    $"[MystiaAI] DialogPannel: 包尾 {trailingSelfEntries.Count} 个 Self 段静默略过（轮末以 NPC 收尾）");
+            }
 
             PluginContext.Log.LogInfo(
                 $"[MystiaAI] 角色 {replacement.CharacterKey}: 共 {replacement.Segments.Count} 段，" +
@@ -570,8 +620,8 @@ internal static class DialogPannelPatch
             if (selfEntry.Handled) return;
             selfEntry.Handled = true;
 
-            // 组内后续句：不弹窗、不停留，置空文本并自动推进到下一句
-            if (!selfEntry.IsGroupFirst && active.GroupDecisions.ContainsKey(selfEntry.GroupId))
+            // 组内后续句、以及预置了决策的组（续聊承接略过）：不弹窗、不停留，置空文本并自动推进到下一句
+            if (active.GroupDecisions.ContainsKey(selfEntry.GroupId))
             {
                 active.PlayerInputs[selfEntry.DialogId] = string.Empty; // 被组决策覆盖，记空串
                 dialogContext = string.Empty;
@@ -879,6 +929,68 @@ internal static class DialogPannelPatch
         return false;
     }
 
+    /// <summary>玩家点了「结束对话」：标记本面板当前替换，本轮播完后不再自动续聊。</summary>
+    internal static void MarkExitRequested(DialogPannel? panel)
+    {
+        try
+        {
+            if (UnityObjectGuard.IsDead(panel)) return;
+            if (Active.TryGetValue(panel!, out var active) && active != null)
+                active.ExitRequested = true;
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] MarkExitRequested 异常: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 一轮对话播完时的快照（自动续聊用）：累计完整 transcript（含前几轮携带内容）、
+    /// 玩家本轮是否有过输入、是否已请求结束。找不到对应替换（非 AI 对话/已销毁）返回 null。
+    /// </summary>
+    internal static (string Transcript, bool HadInput, bool ExitRequested, bool EndedWithPlayerSpeech)? SnapshotRound(string packageKey)
+    {
+        try
+        {
+            foreach (var kv in Active)
+            {
+                var active = kv.Value;
+                if (active == null || active.PackageKey != packageKey) continue;
+                var hadInput = false;
+                foreach (var input in active.PlayerInputs.Values)
+                {
+                    if (!string.IsNullOrEmpty(input)) { hadInput = true; break; }
+                }
+                // 本轮是否以玩家说话收尾（续聊承接用）：从尾往前找最后一句有效发言——
+                // 被组略过的空 Self 句不算；撞上 NPC 句则说明是 NPC 收尾
+                var endedWithPlayerSpeech = false;
+                var segs = active.Replacement.Segments;
+                for (var i = segs.Count - 1; i >= 0; i--)
+                {
+                    var seg = segs[i];
+                    if (seg.IsSelf)
+                    {
+                        if (active.PlayerInputs.TryGetValue(seg.DialogId, out var input)
+                            && !string.IsNullOrEmpty(input))
+                        {
+                            endedWithPlayerSpeech = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (active.Originals.ContainsKey(seg.DialogId)) break;
+                }
+                return (BuildActualTranscript(active, int.MaxValue), hadInput, active.ExitRequested, endedWithPlayerSpeech);
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] SnapshotRound 异常（{packageKey}）: {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>
     /// 截至 beforeDialogId（不含）的实际对话 transcript，逐行「说话人：台词」。
     /// skipUnsettledNpc=true 时（建议生成路径）跳过 AI 还没生成出来的 NPC 句——
@@ -889,6 +1001,9 @@ internal static class DialogPannelPatch
     {
         var protagonist = ProtagonistName(GetCurrentLanguage());
         var lines = new List<string>();
+        // 跨轮携带的前几轮对话（自动续聊）：排在本轮之前，AI 看到的是一整段连续对话
+        if (!string.IsNullOrWhiteSpace(active.CarriedTranscript))
+            lines.Add(active.CarriedTranscript.TrimEnd());
         foreach (var segment in active.Replacement.Segments)
         {
             if (segment.DialogId == beforeDialogId) break;

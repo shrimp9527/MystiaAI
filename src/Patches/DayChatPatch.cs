@@ -45,11 +45,15 @@ internal static class DayChatPatch
 
             if (segments.Count == 0) return;
 
-            PendingReplacementStore.Register(__result, new PendingReplacement
+            var replacement = new PendingReplacement
             {
                 CharacterKey = characterKey,
                 Segments = segments,
-            });
+            };
+            PendingReplacementStore.Register(__result, replacement);
+            // 自动续聊登记：新一轮对话（重置跨轮记录）；播完后由 OpenDialogMenuPatch
+            // 包装的结束回调驱动无缝重开
+            DialogContinuation.Register(__result, replacement);
 
             // 诊断日志：打印匹配键（包名优先，指针兜底）与 native 指针，
             // 便于和 OpenDialogMenuPatch 的诊断输出对照定位匹配失败
