@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.DialogUtility;
@@ -125,7 +124,7 @@ internal sealed class FreeInputOverlay
                 font = panel.context.font;
         });
 
-        // ---- 层级诊断：定位对话框 Canvas，枚举全场景 Canvas，尝试定位软件指针 Canvas ----
+        // ---- 定位对话框根 Canvas、全场景最大 order、软件指针所在 Canvas（后续挂载要用）----
         Canvas? gameRoot = null;
         var dialogOrder = 0;
         Step("定位游戏Canvas", () =>
@@ -133,65 +132,26 @@ internal sealed class FreeInputOverlay
             if (panel == null) return;
             var own = panel.GetComponentInParent<Canvas>();
             gameRoot = own != null ? own.rootCanvas : null;
-            if (own != null)
-            {
-                dialogOrder = own.sortingOrder;
-                PluginContext.Log.LogInfo(
-                    $"[MystiaAI] FreeInputOverlay 诊断: 对话框 Canvas「{own.name}」renderMode={own.renderMode} " +
-                    $"sortingOrder={own.sortingOrder} overrideSorting={own.overrideSorting}；根 Canvas「{(gameRoot == null ? "<null>" : gameRoot.name)}」");
-            }
+            if (own != null) dialogOrder = own.sortingOrder;
         });
 
         var maxOrder = 0;
         Canvas? cursorCanvas = null;
         Step("枚举全场景Canvas", () =>
         {
-            var sb = new StringBuilder();
-            var count = 0;
             foreach (var canvas in UnityEngine.Object.FindObjectsOfType<Canvas>())
             {
                 if (canvas == null) continue;
-                count++;
                 if (canvas.sortingOrder > maxOrder) maxOrder = canvas.sortingOrder;
-                var parentName = canvas.transform.parent == null ? "<场景根>" : canvas.transform.parent.name;
-                sb.Append($"\n  「{canvas.name}」renderMode={canvas.renderMode} order={canvas.sortingOrder} " +
-                          $"override={canvas.overrideSorting} root={(canvas.isRootCanvas ? "是" : "否")} 父={parentName}");
                 if (cursorCanvas == null && LooksLikeCursor(canvas.transform))
                     cursorCanvas = canvas;
             }
-            PluginContext.Log.LogInfo($"[MystiaAI] FreeInputOverlay 诊断: 全场景 Canvas 共 {count} 个：" + sb);
-
-            // 指针也可能不是 Canvas 渲染：顺带查名字含 cursor/mouse 的 SpriteRenderer
-            var foundSpriteCursor = false;
-            foreach (var sr in UnityEngine.Object.FindObjectsOfType<SpriteRenderer>())
-            {
-                if (sr == null || sr.name == null) continue;
-                var n = sr.name.ToLowerInvariant();
-                if (!n.Contains("cursor") && !n.Contains("mouse")) continue;
-                foundSpriteCursor = true;
-                PluginContext.Log.LogInfo(
-                    $"[MystiaAI] FreeInputOverlay 诊断: 疑似指针 SpriteRenderer「{sr.name}」" +
-                    $"sortingLayer={sr.sortingLayerName} sortingOrder={sr.sortingOrder}");
-            }
-            if (!foundSpriteCursor)
-                PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay 诊断: 未发现名字含 cursor/mouse 的 SpriteRenderer");
-
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] FreeInputOverlay 诊断: 指针 Canvas={(cursorCanvas == null ? "未找到" : $"「{cursorCanvas.name}」order={cursorCanvas.sortingOrder}")}；" +
-                $"全场景最大 order={maxOrder}；硬件光标 Cursor.visible={Cursor.visible} lockState={Cursor.lockState}");
         });
 
         Step("检查EventSystem", () =>
         {
-            var es = EventSystem.current;
-            if (es == null)
-            {
-                PluginContext.Log.LogWarning("[MystiaAI] FreeInputOverlay 诊断: EventSystem.current 为 null，按钮点击/聚焦不可用");
-                return;
-            }
-            var module = es.GetComponent<BaseInputModule>();
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] FreeInputOverlay 诊断: EventSystem 输入模块={(module == null ? "<null>" : module.GetType().FullName)}");
+            if (EventSystem.current == null)
+                PluginContext.Log.LogWarning("[MystiaAI] FreeInputOverlay: EventSystem.current 为 null，按钮点击/聚焦不可用");
         });
 
         // ---- 创建画布：挂到游戏 UI 根之下；层级 = 对话框 < 覆盖层 < 指针 ----
@@ -237,10 +197,6 @@ internal sealed class FreeInputOverlay
                     "[MystiaAI] FreeInputOverlay: 硬件光标处于隐藏状态且未找到软件指针 Canvas，" +
                     "覆盖层打开期间强制 Cursor.visible=true（关闭时恢复）");
             }
-
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] FreeInputOverlay 诊断: 覆盖层 renderMode={canvas.renderMode} overrideSorting={canvas.overrideSorting} " +
-                $"siblingIndex={_root.transform.GetSiblingIndex()} 父级={(gameRoot == null ? "<场景根>" : gameRoot.name)}");
         });
 
         // ---- 主面板：对齐「对话正文文本」（panel.context）的矩形，背景全透明——
@@ -271,9 +227,6 @@ internal sealed class FreeInputOverlay
                         var bottom = textPos.y - textSize.y / 2f - 4f;
                         panelPos = new Vector2(textPos.x, (top + bottom) / 2f);
                         panelSize = new Vector2(textSize.x + 8f, top - bottom);
-                        PluginContext.Log.LogInfo(
-                            $"[MystiaAI] FreeInputOverlay: 已对齐对话正文 textPos={textPos} textSize={textSize} " +
-                            $"panelPos={panelPos} panelSize={panelSize}");
                     }
                     else
                     {
@@ -485,14 +438,12 @@ internal sealed class FreeInputOverlay
 
             var captured = result;
             MainThreadDispatcher.Post(() => ApplySuggestions(captured));
-            PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 建议回调已入队");
         });
     }
 
     /// <summary>建议结果落回主线程：填充按钮文本并放开点击；失败/超时置灰。</summary>
     private void ApplySuggestions(IReadOnlyList<string>? result)
     {
-        PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: ApplySuggestions 进入");
         if (_closed) return;
         _suggestionsLoading = false;
         try
@@ -577,19 +528,11 @@ internal sealed class FreeInputOverlay
     }
 
     /// <summary>
-    /// 从对话框层级里找对话框底图 Image（双策略：特征名优先 + 尺寸过滤兜底）：
-    /// 先排除「全屏级」候选（宽 ≥ 屏 85% 且 高 ≥ 屏 70%——那是对话打开时游戏罩的全屏暗化遮罩，
-    /// 不是对话框本体，截图实证），剩余候选里特征名（dialog/bg/box/frame/window/back/base）
-    /// 优先、同优先级取面积最大者。全部候选（含排除原因）打诊断日志。
-    /// </summary>
-    /// <summary>
     /// 在 DialogPannel 层级里找「对话正文」文本组件：activeInHierarchy 且屏幕像素面积最大的 TMP。
-    /// 每个候选都打诊断日志（名称/active/canvas rect/屏幕像素尺寸），选错时凭日志校准。
     /// </summary>
     private static RectTransform? FindDialogTextArea(DialogPannel? panel)
     {
         if (UnityObjectGuard.IsDead(panel)) return null;
-        var log = new StringBuilder();
         RectTransform? best = null;
         var bestArea = 0f;
         foreach (var tmp in panel!.GetComponentsInChildren<TextMeshProUGUI>(true))
@@ -620,15 +563,12 @@ internal sealed class FreeInputOverlay
                 w = tr.x - bl.x;
                 h = tr.y - bl.y;
                 active = tmp.gameObject.activeInHierarchy;
-                log.Append($"\n  「{tmp.name}」active={active} rect={r.width:F0}x{r.height:F0} " +
-                           $"屏幕={w:F0}x{h:F0} 角0=({bl.x:F0},{bl.y:F0})");
             }
-            catch (Exception ex)
+            catch
             {
-                log.Append($"\n  「{tmp.name}」读取失败: {ex.Message}");
                 continue;
             }
-            if (!active || w < 100f || h < 30f) { log.Append(" → 跳过"); continue; }
+            if (!active || w < 100f || h < 30f) continue;
             var area = w * h;
             if (area > bestArea)
             {
@@ -636,8 +576,6 @@ internal sealed class FreeInputOverlay
                 best = rt;
             }
         }
-        PluginContext.Log.LogInfo(
-            $"[MystiaAI] FreeInputOverlay: 对话文本组件扫描，选中「{(best == null ? "<无>" : best.name)}」：" + log);
         return best;
     }
 
@@ -727,17 +665,12 @@ internal sealed class FreeInputOverlay
     private static string TruncateForButton(string s)
         => s.Length <= 12 ? s : s.Substring(0, 12) + "…";
 
-    private static int _pollTicks;
-
     private void Poll()
     {
         if (_closed || _closeQueued) return;
 
         // 心跳：覆盖层存活期间 Poll 一直在跑——崩溃后若心跳还在增长的时间点附近停住，
         // 可界定崩溃时刻与 Poll 无关；若心跳中断即崩，凶手在 Poll 内
-        if (++_pollTicks % 600 == 0)
-            PluginContext.Log.LogInfo($"[MystiaAI] FreeInputOverlay: Poll 心跳 {_pollTicks}");
-
         // 保险：场景切换等导致覆盖层对象被销毁（fake-null）或 Il2Cpp 包装被 GC 回收
         // 但仍挂着引用时自动关闭，否则 IsOpen 永久为 true 会把 GuardWhileOverlayOpen 卡死在拦截态
         if (UnityObjectGuard.IsDead(_root))
@@ -1005,16 +938,13 @@ internal sealed class FreeInputOverlay
             if (cursorRoot != null)
             {
                 _root.transform.SetSiblingIndex(cursorIndex);
-                PluginContext.Log.LogInfo(
-                    $"[MystiaAI] FreeInputOverlay: 指针根层级子节点「{cursorRoot.name}」原 siblingIndex={cursorIndex}" +
-                    $"（插入后顺移为 {cursorRoot.GetSiblingIndex()}），覆盖层 siblingIndex={_root.transform.GetSiblingIndex()}");
             }
             else
             {
                 _root.transform.SetAsFirstSibling();
                 PluginContext.Log.LogWarning(
                     "[MystiaAI] FreeInputOverlay: 未在 RootCanvas 直接子节点中定位到指针元素，" +
-                    "退化为 SetAsFirstSibling（覆盖层可能压在对话框之下，请反馈 Canvas 枚举日志）");
+                    "退化为 SetAsFirstSibling（覆盖层可能压在对话框之下，请反馈）");
             }
         }
         catch (Exception ex)

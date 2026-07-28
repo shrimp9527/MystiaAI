@@ -109,12 +109,7 @@ internal static class MainThreadDispatcher
         try
         {
             while (Queue.TryDequeue(out var action))
-            {
-                // 崩溃定位埋点：若下次闪退日志最后一条是「开始」而无「结束」，凶手就是这个 action
-                PluginContext.Log.LogInfo("[MystiaAI] Dispatcher: 派发动作开始");
                 Safe(action);
-                PluginContext.Log.LogInfo("[MystiaAI] Dispatcher: 派发动作结束");
-            }
         }
         catch (Exception ex)
         {

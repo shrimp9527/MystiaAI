@@ -34,17 +34,10 @@ public static class NewspaperReader
             var all = RunTimeScheduler.newsData;
             var total = all?.Count ?? 0;
 
-            // 诊断：一次实测即可对齐各字段实况
-            int? bufferedLen = null;
-            var scheduledKeys = -1;
-            try { bufferedLen = RunTimeScheduler.bufferedDailyNewsData?.Length; } catch { /* 诊断失败无碍 */ }
-            try { scheduledKeys = RunTimeScheduler.scheduledNews?.Count ?? -1; } catch { /* 同上 */ }
-
             if (total == 0)
             {
                 PluginContext.Log.LogWarning(
-                    $"[MystiaAI] NewspaperReader: newsData 为空（剪报未解锁或今日未刷新），news 置空串" +
-                    $"（newsData={total} scheduledNews键数={scheduledKeys} buffered={(bufferedLen?.ToString() ?? "null")}）");
+                    $"[MystiaAI] NewspaperReader: newsData 为空（剪报未解锁或今日未刷新），news 置空串");
                 return string.Empty;
             }
 
@@ -83,10 +76,6 @@ public static class NewspaperReader
                     PluginContext.Log.LogWarning($"[MystiaAI] NewspaperReader: 单条剪报读取失败（跳过）: {ex.Message}");
                 }
             }
-
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] NewspaperReader 诊断: newsData={total} 最新day={maxDay} 当日条数={count} " +
-                $"scheduledNews键数={scheduledKeys} buffered={(bufferedLen?.ToString() ?? "null")}");
 
             if (count == 0)
             {

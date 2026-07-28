@@ -473,7 +473,7 @@ internal static class DialogPannelPatch
                 context.Extra.TryGetValue("news", out var newsText);
                 PluginContext.Log.LogInfo(
                     $"[MystiaAI] DialogPannel: 包 {active.PackageKey} 段 dialogId={entry.DialogId} " +
-                    $"发起懒生成（时间={context.GameTime} 报纸={(string.IsNullOrEmpty(newsText) ? "<无>" : newsText)}）");
+                    $"发起懒生成（时间={context.GameTime} 报纸={(string.IsNullOrEmpty(newsText) ? "<无>" : Truncate(newsText))}）");
             }
 
             var task = entry.AiTask;
@@ -572,15 +572,7 @@ internal static class DialogPannelPatch
     /// <summary>主线程 drain 备选派发队列（仅 Update 通道未建立时兜底）。覆盖层轮询泵已挪到 EventSystem.Update。</summary>
     private static void OnGUI_Postfix()
     {
-        // 点击崩溃排除法埋点：每次鼠标按下都会在 OnGUI 收到 MouseDown 事件，
-        // 崩溃后看日志最后一条是「进入」还是「离开」即可定位是否死在本 postfix 内
-        var evt = UnityEngine.Event.current;
-        var isClick = evt != null && evt.type == UnityEngine.EventType.MouseDown;
-        if (isClick)
-            PluginContext.Log.LogInfo("[MystiaAI] OnGUI postfix: MouseDown 进入");
         MainThreadDispatcher.DrainFromOnGUI(); // Update 通道活着时是空操作（OnGUI 事件内不做原生 UI 调用）
-        if (isClick)
-            PluginContext.Log.LogInfo("[MystiaAI] OnGUI postfix: MouseDown 离开");
     }
 
     /// <summary>按键锁定：覆盖层打开期间跳过 DialogPannel 的全部 InputAction 回调。</summary>
@@ -588,14 +580,8 @@ internal static class DialogPannelPatch
     {
         try
         {
-            var open = FreeInputOverlay.IsOpen;
-            if (open)
-            {
-                // 埋点：点击触发 Interact（若游戏绑了鼠标）时会留下这条日志，排除法定位用
-                PluginContext.Log.LogInfo(
-                    $"[MystiaAI] Guard: 覆盖层打开中，拦截 {(__originalMethod == null ? "<unknown>" : __originalMethod.Name)}");
+            if (FreeInputOverlay.IsOpen)
                 return false; // 跳过原方法
-            }
             return true;
         }
         catch
@@ -734,7 +720,7 @@ internal static class DialogPannelPatch
         context.Extra.TryGetValue("news", out var newsText);
         PluginContext.Log.LogInfo(
             $"[MystiaAI] DialogPannel: Self 段 dialogId={selfEntry.DialogId} 建议上下文已预取" +
-            $"（时间={context.GameTime} 报纸={(string.IsNullOrEmpty(newsText) ? "<无>" : newsText)}）");
+            $"（时间={context.GameTime} 报纸={(string.IsNullOrEmpty(newsText) ? "<无>" : Truncate(newsText))}）");
         return cancellationToken =>
             PluginContext.AiClient.GenerateReplyOptionsAsync(context, npcLine, 2, cancellationToken);
     }

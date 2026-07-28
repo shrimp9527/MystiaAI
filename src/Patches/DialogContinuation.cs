@@ -85,34 +85,12 @@ internal static class DialogContinuation
         try
         {
             if (!PluginContext.Settings.Enabled) return false;
-            if (_finishingKey == null)
-            {
-                PluginContext.Log.LogInfo("[MystiaAI] AfterChatMenu 判定：不在结束回调窗口内");
-                return false;
-            }
-            if (!Entries.TryGetValue(_finishingKey, out var entry))
-            {
-                PluginContext.Log.LogInfo($"[MystiaAI] AfterChatMenu 判定：{_finishingKey} 未登记续聊");
-                return false;
-            }
-            if (entry.CharacterKey != characterLabel)
-            {
-                PluginContext.Log.LogInfo($"[MystiaAI] AfterChatMenu 判定：角色不符（收尾包角色={entry.CharacterKey}，菜单={characterLabel}）");
-                return false;
-            }
-            if (entry.Rounds >= MaxRounds || !IsDayPhase())
-            {
-                PluginContext.Log.LogInfo("[MystiaAI] AfterChatMenu 判定：轮数上限或非白天时段");
-                return false;
-            }
+            if (_finishingKey == null) return false; // 不在结束回调窗口内（如首次开菜单），照常
+            if (!Entries.TryGetValue(_finishingKey, out var entry)) return false;
+            if (entry.CharacterKey != characterLabel) return false;
+            if (entry.Rounds >= MaxRounds || !IsDayPhase()) return false;
             var snapshot = DialogPannelPatch.SnapshotRound(_finishingKey);
-            if (snapshot == null)
-            {
-                PluginContext.Log.LogInfo("[MystiaAI] AfterChatMenu 判定：取不到面板快照");
-                return false;
-            }
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] AfterChatMenu 判定：有输入={snapshot.Value.HadInput} 请求结束={snapshot.Value.ExitRequested}");
+            if (snapshot == null) return false;
             return snapshot.Value.HadInput && !snapshot.Value.ExitRequested;
         }
         catch

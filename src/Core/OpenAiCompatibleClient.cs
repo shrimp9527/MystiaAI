@@ -61,9 +61,6 @@ public sealed class OpenAiCompatibleClient : IAiClient
     public async Task<string> GenerateAsync(GenerationContext context, CancellationToken cancellationToken = default)
     {
         var messages = PromptBuilder.BuildMessages(context, GetPersona(context));
-        // 诊断：记录实际发给模型的 user 消息（场景/transcript/报纸全在里面），排查「AI 不知道上下文」用
-        PluginContext.Log.LogInfo(
-            $"[MystiaAI] AI 请求（{context.Scene}/{context.CharacterName}）user 消息：\n{messages[messages.Count - 1].Content}");
         // max_tokens 要留足余量：deepseek-v4 等带思考链的模型会先消耗推理 token，
         // 卡太死会导致正文还没输出就被截断（表现为"AI 返回内容为空"）
         var maxTokens = Math.Max(512, EffectiveMaxLength(context) * 4);

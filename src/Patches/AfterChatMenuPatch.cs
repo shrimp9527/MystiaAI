@@ -20,10 +20,11 @@ internal static class AfterChatMenuPatch
     {
         try
         {
-            var suppress = DialogContinuation.ShouldSuppressAfterChatMenu(specialCharacterLabel);
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] AfterChatMenu: 调用（label={specialCharacterLabel}，抑制={suppress}）");
-            if (suppress) return false; // 跳过菜单打开
+            if (DialogContinuation.ShouldSuppressAfterChatMenu(specialCharacterLabel))
+            {
+                PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 抑制聊后菜单（{specialCharacterLabel}），直接进入下一轮");
+                return false; // 跳过菜单打开
+            }
         }
         catch (Exception ex)
         {
