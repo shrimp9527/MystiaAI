@@ -180,6 +180,14 @@ public static class PromptBuilder
                 : "可以自然地把报纸内容当作闲聊话题，但不要每句都提。\n");
     }
 
+    /// <summary>地点文本（Extra["location"]，空/未传时按「户外」兜底）。</summary>
+    private static string LocationText(GenerationContext context)
+    {
+        return context.Extra.TryGetValue("location", out var loc) && !string.IsNullOrWhiteSpace(loc)
+            ? loc.Trim()
+            : "户外";
+    }
+
     /// <summary>
     /// 情境行（NPC 视角，"你"=NPC）：「现在是{GameTime}，{场景描述}。」，
     /// GameTime 为空时只写场景描述。对话改写与单句路径统一使用，避免两处说法打架。
@@ -190,7 +198,7 @@ public static class PromptBuilder
         switch (context.Scene)
         {
             case ChatScene.DayChat:
-                sceneDesc = "你们在户外偶遇闲聊（不是营业时间，不在居酒屋里）";
+                sceneDesc = $"你们在{LocationText(context)}偶遇闲聊（不是营业时间，不在居酒屋里）";
                 break;
             case ChatScene.NightChat:
                 sceneDesc = "夜晚营业中，你在米斯蒂娅的夜雀食堂里";
@@ -216,7 +224,7 @@ public static class PromptBuilder
         switch (context.Scene)
         {
             case ChatScene.DayChat:
-                sceneDesc = "你与对方在户外偶遇闲聊（不是营业时间，不在居酒屋里）";
+                sceneDesc = $"你与对方在{LocationText(context)}偶遇闲聊（不是营业时间，不在居酒屋里）";
                 notOpen = true;
                 break;
             case ChatScene.NightChat:

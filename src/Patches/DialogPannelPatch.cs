@@ -719,7 +719,7 @@ internal static class DialogPannelPatch
                     // 没有过去对话时 transcript 为空串；未定型 NPC 句过滤掉（快进连点可能多句 pending）
                     ["transcript"] = BuildActualTranscript(active, selfEntry.DialogId, skipUnsettledNpc: true),
                     ["characterKey"] = active.Replacement.CharacterKey,
-                    ["location"] = "户外白天地图",
+                    ["location"] = GetDayLocationText(),
                     ["news"] = NewspaperReader.GetTodayNewsSummary(),
                 },
             };
@@ -775,6 +775,16 @@ internal static class DialogPannelPatch
                 return;
             }
             entry.AutoAdvancePending = false;
+
+            // 关键校验：对话框当前已停在 NPC 句（CurrentLine 非空），说明被略过的 Self 句
+            // 早已随空文本协程自然推进——这记迟到的 Interact 会误把 NPC 的生成中占位符顶过去
+            // （露米娅包的多句玩家组/续聊开头略过都踩过：AI 还没生成就跳成玩家输入/连跳多句）
+            if (active.CurrentLine != null)
+            {
+                PluginContext.Log.LogInfo(
+                    $"[MystiaAI] DialogPannel: Self 段 dialogId={entry.DialogId} 的自动推进已过期（对话已推进到 NPC 句），放弃");
+                return;
+            }
 
             try
             {
@@ -900,7 +910,7 @@ internal static class DialogPannelPatch
                 ["transcript"] = BuildActualTranscript(active, current.DialogId),
                 ["targetOriginal"] = current.Original,
                 ["characterKey"] = active.Replacement.CharacterKey,
-                ["location"] = "户外白天地图",
+                ["location"] = GetDayLocationText(),
                 // 文文新闻当日剪报（流行情报等），未解锁/无数据为空串，prompt 侧判空
                 ["news"] = NewspaperReader.GetTodayNewsSummary(),
                 // 玩家输入提到报纸/新闻关键词时强制注入（AI 得知道内容才接得上话）；
@@ -1069,6 +1079,30 @@ internal static class DialogPannelPatch
                 last = original;
         }
         return last;
+    }
+
+    /// <summary>
+    /// 白天当前地图显示名（prompt 的地点锚点）：与左上角地图名同源——
+    /// DayScene.SceneManager.Instance.CurrentActiveMapLabel → DaySceneLanguage.GetMapLanguageData(label).Name
+    /// （游戏左上角地名就是这条链路，MystiaReverse/DayScene/UI/UIManager.cs:293）。
+    /// 读取失败降级为「户外白天地图」。
+    /// </summary>
+    internal static string GetDayLocationText()
+    {
+        try
+        {
+            var label = DayScene.SceneManager.Instance?.CurrentActiveMapLabel;
+            if (!string.IsNullOrEmpty(label))
+            {
+                var name = GameData.CoreLanguage.Collections.DaySceneLanguage.GetMapLanguageData(label)?.Name;
+                if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] 读取当前地图名失败（降级为通用地点）: {ex.Message}");
+        }
+        return "户外白天地图";
     }
 
     /// <summary>主角名按游戏语言映射（transcript 里 Self 行的说话人标签）。</summary>
