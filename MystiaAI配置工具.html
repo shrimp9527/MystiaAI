@@ -87,6 +87,8 @@
   .field input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
   .field input[type=checkbox]:checked::after { left: 19px; background: #fff; }
   .hint { font-size: 12px; color: var(--dim); margin: -7px 0 13px 182px; max-width: 520px; }
+  /* 提示词页与占位符悬浮窗：说明通栏左对齐，不吃设置页的 182px 标签缩进 */
+  #promptsPage .hint, #placeholderPanel .hint { margin: -7px 0 13px 0; max-width: none; }
 
   /* 角色设定页 */
   #personaPage { display: flex; gap: 14px; height: calc(100vh - 195px); max-width: 1100px; margin: 0 auto; }
@@ -126,6 +128,45 @@
     border-radius: 6px; padding: 12px 14px; font-size: 14px; line-height: 1.8; resize: none;
     font-family: inherit;
   }
+  /* 提示词编辑框：底层高亮层 + 上层透明 textarea（caret 可见），实现占位符着色 */
+  .editor-wrap { position: relative; margin-bottom: 14px; text-align: left; }
+  .editor-backdrop, .prompt-editor {
+    font-family: inherit; font-size: 13.5px; line-height: 1.8;
+    padding: 12px 14px; border-radius: 6px; box-sizing: border-box;
+    text-align: left;
+  }
+  .editor-backdrop {
+    position: absolute; inset: 0; background: #fff;
+    border: 1px solid var(--border); overflow: hidden; pointer-events: none;
+  }
+  .editor-highlight { white-space: pre-wrap; word-wrap: break-word; color: var(--text); min-height: 100%; padding-right: 17px; }
+  .editor-highlight .tok-known { color: #2563eb; }
+  .editor-highlight .tok-unknown { color: #b03a2a; }
+  .prompt-editor {
+    position: relative; display: block; width: 100%; min-height: 150px;
+    background: transparent; color: transparent; caret-color: var(--text);
+    border: 1px solid transparent; resize: vertical; overflow-y: scroll;
+  }
+  .prompt-editor:focus { outline: none; }
+  .editor-wrap:focus-within .editor-backdrop { border-color: var(--accent); }
+  #placeholderTable { border-collapse: collapse; font-size: 13px; width: 100%; }
+  #placeholderTable td { border: 1px solid var(--border); padding: 6px 12px; }
+  #placeholderTable .phDesc { display: block; margin-top: 2px; color: var(--dim); line-height: 1.5; }
+  #placeholderPanel {
+    position: fixed; right: 16px; top: 72px; width: 370px; z-index: 900;
+    max-height: calc(100vh - 110px); overflow-y: auto;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
+  }
+  #placeholderPanel .ph {
+    cursor: pointer; color: var(--accent); background: rgba(181, 84, 46, .08);
+    padding: 1px 5px; border-radius: 4px; user-select: none;
+  }
+  #placeholderPanel .ph:hover { background: rgba(181, 84, 46, .2); }
+  #copyToast {
+    position: fixed; right: 20px; bottom: 20px; background: var(--accent); color: #fff;
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; opacity: 0;
+    transition: opacity .2s; pointer-events: none; z-index: 999;
+  }
   #charEditor textarea:focus { outline: none; border-color: var(--accent); }
   .placeholder-warn { color: #b03a2a; font-size: 12px; }
 
@@ -150,6 +191,7 @@
 <nav>
   <div class="tab active" data-page="settingsPage">通用设置</div>
   <div class="tab" data-page="personaPage">角色设定</div>
+  <div class="tab" data-page="promptsPage">提示词结构</div>
   <div class="noren-gap"></div>
 </nav>
 <main>
@@ -211,7 +253,59 @@
       <textarea id="c_persona" placeholder="在此填写角色人设：种族身份 + 性格 + 口癖/说话习惯…"></textarea>
     </div>
   </div>
+
+  <!-- ============ 提示词结构 ============ -->
+  <div id="promptsPage" class="card" style="display:none">
+    <h2>System 提示词（NPC 台词生成）</h2>
+    <div class="hint">每条 NPC 台词/闲聊/评价生成时使用的 system 指令，留空字段会回退内置默认</div>
+    <textarea id="p_system" class="prompt-editor" placeholder="System 提示词模板…"></textarea>
+    <h2>System 提示词（玩家回复选项生成）</h2>
+    <div class="hint">生成「AI 建议回复」按钮内容时使用的 system 指令</div>
+    <textarea id="p_systemReplyOptions" class="prompt-editor" placeholder="回复选项 System 提示词模板…"></textarea>
+    <h2>User 提示词（白天对话·连贯改写）</h2>
+    <div class="hint">白天多句对话中逐句生成 NPC 台词时使用（带完整对话记录）</div>
+    <textarea id="p_userDayChat" class="prompt-editor"></textarea>
+    <h2>User 提示词（白天单句）</h2>
+    <div class="hint">白天每轮首句、无对话记录时使用</div>
+    <textarea id="p_userDaySingle" class="prompt-editor"></textarea>
+    <h2>User 提示词（营业闲聊）</h2>
+    <div class="hint">营业时间稀客/普客的闲聊与头顶气泡使用</div>
+    <textarea id="p_userNightChat" class="prompt-editor"></textarea>
+    <h2>User 提示词（上菜评价）</h2>
+    <div class="hint">客人吃完料理后的评价语使用</div>
+    <textarea id="p_userEvaluation" class="prompt-editor"></textarea>
+    <h2>User 提示词（AI 建议回复选项）</h2>
+    <div class="hint">生成输入框旁两个推荐回复按钮内容时使用</div>
+    <textarea id="p_userReplyOptions" class="prompt-editor"></textarea>
+  </div>
 </main>
+
+<!-- 占位符速查：悬浮窗（固定于视口右侧，不随页面滚动；仅在提示词结构页签显示） -->
+<div id="placeholderPanel" class="card" style="display:none">
+  <h2>可用占位符</h2>
+  <div class="hint">括号内中文仅为辅助理解，实际调用名是英文花括号形式；<b>点击占位符即可复制</b>。写错名字会原样保留并在游戏日志提示一次。后续版本会补充更多可配置项。</div>
+  <table id="placeholderTable">
+    <tr><td><code class="ph">{characterName}</code><span class="phDesc">角色名（当前说话的角色显示名）</span></td></tr>
+    <tr><td><code class="ph">{persona}</code><span class="phDesc">该角色人设（仅 System 模板有效）</span></td></tr>
+    <tr><td><code class="ph">{gameTime}</code><span class="phDesc">游戏内时间（如「白天 10:30」「夜晚营业中」）</span></td></tr>
+    <tr><td><code class="ph">{location}</code><span class="phDesc">当前地图名（如「妖怪兽道」，白天有效）</span></td></tr>
+    <tr><td><code class="ph">{scene}</code><span class="phDesc">当前场景描述（不含时间）</span></td></tr>
+    <tr><td><code class="ph">{situationLine}</code><span class="phDesc">情境行（时间+场景的组合，NPC 视角）</span></td></tr>
+    <tr><td><code class="ph">{mystiaSituationLine}</code><span class="phDesc">情境行（米斯蒂娅视角，仅回复选项用）</span></td></tr>
+    <tr><td><code class="ph">{transcript}</code><span class="phDesc">完整对话记录（含前几轮续聊内容）</span></td></tr>
+    <tr><td><code class="ph">{targetOriginal}</code><span class="phDesc">当前句的游戏原剧本（仅连贯改写）</span></td></tr>
+    <tr><td><code class="ph">{playerReply}</code><span class="phDesc">玩家上一句回应（带承接引导，无则为空）</span></td></tr>
+    <tr><td><code class="ph">{npcLine}</code><span class="phDesc">最近一句 NPC 台词（仅回复选项用）</span></td></tr>
+    <tr><td><code class="ph">{dish}</code><span class="phDesc">菜品名（仅上菜评价）</span></td></tr>
+    <tr><td><code class="ph">{rating}</code><span class="phDesc">评价等级（仅上菜评价）</span></td></tr>
+    <tr><td><code class="ph">{kizunaLevel}</code><span class="phDesc">羁绊等级（数字）</span></td></tr>
+    <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（预留，后续版本接入）</span></td></tr>
+    <tr><td><code class="ph">{news}</code><span class="phDesc">当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）</span></td></tr>
+    <tr><td><code class="ph">{language}</code><span class="phDesc">游戏语言（跟随游戏设置）</span></td></tr>
+    <tr><td><code class="ph">{maxLength}</code><span class="phDesc">字数上限（通用设置里的最大字数）</span></td></tr>
+    <tr><td><code class="ph">{optionCount}</code><span class="phDesc">建议回复条数（仅回复选项用）</span></td></tr>
+  </table>
+</div>
 <footer>
   配置文件夹：文档（Documents）\MystiaAI\ ｜ 保存后游戏内 2 秒内自动热重载 ｜
   Chrome / Edge 可直接写回文件夹，其他浏览器保存时会下载文件请手动替换 ｜ v0.1.1（若页脚无此行说明是缓存旧版，请 Ctrl+F5 强制刷新）
@@ -877,6 +971,28 @@ function defaultSettings() {
   };
 }
 
+// 与 mod 端 PromptTemplateStore 的内置默认完全一致
+const DEFAULT_PROMPT_SYSTEM = "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。扮演规则：1.贴合原作风格，不OOC，不使用网络流行语；2.台词贴合角色性格，使用短句和口语；3.人设资料中包含该角色的档案与原版点餐/评价对话范本，参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；4.仅输出角色台词本身，不含旁白、引号与额外说明。以该角色的口吻说一句话。要求：使用{language}；不超过{maxLength}字。";
+const DEFAULT_PROMPT_REPLY = "你正在扮演米斯蒂娅·萝蕾拉——《东方夜雀食堂》的主角，开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {characterName}。";
+const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
+const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
+const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
+const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。你与老板娘的羁绊等级：{kizunaLevel}。\n{news}";
+const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
+
+function defaultPrompts() {
+  return {
+    "_meta": { "tool": "MystiaAI", "kind": "prompts", "version": "1" },
+    "system": DEFAULT_PROMPT_SYSTEM,
+    "systemReplyOptions": DEFAULT_PROMPT_REPLY,
+    "userDayChat": DEFAULT_USER_DAYCHAT,
+    "userDaySingle": DEFAULT_USER_DAYSINGLE,
+    "userNightChat": DEFAULT_USER_NIGHTCHAT,
+    "userEvaluation": DEFAULT_USER_EVAL,
+    "userReplyOptions": DEFAULT_USER_REPLYOPTS,
+  };
+}
+
 function defaultPersonas() {
   return JSON.parse(document.getElementById("builtinPersonasData").textContent);
 }
@@ -884,6 +1000,7 @@ function defaultPersonas() {
 /* ================= 状态（两个文件并行编辑） ================= */
 const settingsState = { data: null, dirty: false, created: false };
 const personasState = { data: null, dirty: false, created: false };
+const promptsState = { data: null, dirty: false, created: false };
 let dirHandle = null;   // FileSystemDirectoryHandle（无目录写权限的浏览器为 null，保存退化为下载）
 let dirName = "";
 let selectedKey = null; // 角色设定页当前选中（"cat:Default" 或 "char:Rumia"）
@@ -891,7 +1008,7 @@ let selectedKey = null; // 角色设定页当前选中（"cat:Default" 或 "char
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
 function setStatus(msg, cls) { statusEl.textContent = msg; statusEl.className = cls || ""; }
-function anyDirty() { return settingsState.dirty || personasState.dirty; }
+function anyDirty() { return settingsState.dirty || personasState.dirty || promptsState.dirty; }
 function refreshSaveBtn() { $("btnSave").disabled = !anyDirty(); }
 function markDirty(st) { st.dirty = true; refreshSaveBtn(); }
 
@@ -960,7 +1077,7 @@ async function openFolder() {
 
 // readFile(name) → Promise<text>，文件不存在时抛 NotFoundError
 async function readFromDirectory(readFile) {
-  settingsState.data = null; personasState.data = null;
+  settingsState.data = null; personasState.data = null; promptsState.data = null;
   let found = 0; const notes = []; const errors = [];
 
   // settings.json
@@ -996,6 +1113,25 @@ async function readFromDirectory(readFile) {
     }
   }
 
+  // prompts.json（可选：旧版本没有此文件，缺失不视为错误）
+  {
+    try {
+      const text = await readFile("prompts.json");
+      const d = JSON.parse(text);
+      promptsState.data = Object.assign(defaultPrompts(), d);
+      notes.push("prompts.json 已加载");
+    } catch (e) {
+      if (e && e.name === "NotFoundError") {
+        promptsState.data = defaultPrompts();
+        promptsState.dirty = true; promptsState.created = true;
+        notes.push("prompts.json 不存在，已按默认新建（保存时写入）");
+      } else {
+        promptsState.data = defaultPrompts();
+        errors.push("prompts.json 读取失败（已回退默认）：" + e.message);
+      }
+    }
+  }
+
   if (found === 0 && !settingsState.created && !personasState.created) {
     // 两个文件都读到了但都不认 → 选错文件夹
     dirHandle = null;
@@ -1016,6 +1152,7 @@ async function readFromDirectory(readFile) {
 function afterLoad() {
   if (settingsState.data) fillSettingsForm();
   if (personasState.data) { normalizePersonas(); renderCharTree(); selectKey("cat:Default"); }
+  if (promptsState.data) fillPromptsForm();
   refreshSaveBtn();
 }
 
@@ -1054,11 +1191,14 @@ function downloadText(name, text) {
 async function saveAll() {
   collectSettingsForm();
   collectPersonaEditor();
+  collectPromptsForm();
   const jobs = [];
   if (settingsState.data && settingsState.dirty)
     jobs.push(["settings.json", JSON.stringify(settingsState.data, null, 2), settingsState]);
   if (personasState.data && personasState.dirty)
     jobs.push(["personas.json", JSON.stringify(personasState.data, null, 2), personasState]);
+  if (promptsState.data && promptsState.dirty)
+    jobs.push(["prompts.json", JSON.stringify(promptsState.data, null, 2), promptsState]);
   if (!jobs.length) { setStatus("没有需要保存的修改", ""); return; }
   try {
     for (const [name, text, st] of jobs) {
@@ -1093,6 +1233,8 @@ async function newConfig() {
   settingsState.dirty = true; settingsState.created = true;
   personasState.data = defaultPersonas();
   personasState.dirty = true; personasState.created = true;
+  promptsState.data = defaultPrompts();
+  promptsState.dirty = true; promptsState.created = true;
   afterLoad();
   setStatus(`已创建默认配置（目标：${dirName}），点「保存修改」写入`, "ok");
 }
@@ -1302,16 +1444,131 @@ $("btnResetChar").addEventListener("click", () => {
   markDirty(personasState); updateCharState();
 });
 
+/* ================= 提示词结构页 ================= */
+function fillPromptsForm() {
+  const d = promptsState.data;
+  if (!d) return;
+  $("p_system").value = d.system ?? DEFAULT_PROMPT_SYSTEM;
+  $("p_systemReplyOptions").value = d.systemReplyOptions ?? DEFAULT_PROMPT_REPLY;
+  $("p_userDayChat").value = d.userDayChat ?? DEFAULT_USER_DAYCHAT;
+  $("p_userDaySingle").value = d.userDaySingle ?? DEFAULT_USER_DAYSINGLE;
+  $("p_userNightChat").value = d.userNightChat ?? DEFAULT_USER_NIGHTCHAT;
+  $("p_userEvaluation").value = d.userEvaluation ?? DEFAULT_USER_EVAL;
+  $("p_userReplyOptions").value = d.userReplyOptions ?? DEFAULT_USER_REPLYOPTS;
+  for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDaySingle",
+    "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"])
+    highlightPromptEditor($(id));
+}
+
+function collectPromptsForm() {
+  if (!promptsState.data) return;
+  promptsState.data.system = $("p_system").value;
+  promptsState.data.systemReplyOptions = $("p_systemReplyOptions").value;
+  promptsState.data.userDayChat = $("p_userDayChat").value;
+  promptsState.data.userDaySingle = $("p_userDaySingle").value;
+  promptsState.data.userNightChat = $("p_userNightChat").value;
+  promptsState.data.userEvaluation = $("p_userEvaluation").value;
+  promptsState.data.userReplyOptions = $("p_userReplyOptions").value;
+  promptsState.data._meta = { tool: "MystiaAI", kind: "prompts", version: "1" };
+}
+
+for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDaySingle",
+  "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"])
+  $(id).addEventListener("input", () => { collectPromptsForm(); markDirty(promptsState); });
+
+/* ================= 占位符语法高亮（已知蓝 / 未知红） ================= */
+const KNOWN_PLACEHOLDERS = new Set([
+  "characterName", "persona", "gameTime", "location", "scene", "situationLine",
+  "mystiaSituationLine", "transcript", "targetOriginal", "playerReply", "npcLine",
+  "dish", "rating", "kizunaLevel", "bondTone", "news", "language", "maxLength", "optionCount",
+]);
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// textarea 无法显示彩色文本：底层放镜像高亮层，textarea 文字透明、caret 保留
+function highlightPromptEditor(ta) {
+  let wrap = ta.parentElement;
+  if (!wrap.classList.contains("editor-wrap")) {
+    wrap = document.createElement("div");
+    wrap.className = "editor-wrap";
+    ta.parentElement.insertBefore(wrap, ta);
+    const bd = document.createElement("div");
+    bd.className = "editor-backdrop";
+    const hl = document.createElement("div");
+    hl.className = "editor-highlight";
+    bd.appendChild(hl);
+    wrap.appendChild(bd);
+    wrap.appendChild(ta);
+  }
+  const hl = wrap.querySelector(".editor-highlight");
+  const html = escapeHtml(ta.value).replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g,
+    (m, name) => KNOWN_PLACEHOLDERS.has(name)
+      ? `<span class="tok-known">${m}</span>`
+      : `<span class="tok-unknown">${m}</span>`);
+  hl.innerHTML = html + "\n";
+  hl.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+}
+
+for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDaySingle",
+  "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"]) {
+  const ta = $(id);
+  ta.addEventListener("input", () => highlightPromptEditor(ta));
+  ta.addEventListener("scroll", () => highlightPromptEditor(ta));
+  highlightPromptEditor(ta);
+}
+
+/* ================= 占位符点击复制 ================= */
+function showCopyToast(text) {
+  let t = $("copyToast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "copyToast";
+    document.body.appendChild(t);
+  }
+  t.textContent = "已复制 " + text;
+  t.style.opacity = "1";
+  clearTimeout(showCopyToast._timer);
+  showCopyToast._timer = setTimeout(() => { t.style.opacity = "0"; }, 1200);
+}
+document.querySelectorAll("#placeholderPanel .ph").forEach(el => {
+  el.addEventListener("click", async () => {
+    const text = el.textContent;
+    // 即时本地反馈：元素闪烁（证明点击已注册，不受剪贴板权限影响）
+    el.style.transition = "none";
+    el.style.background = "rgba(181, 84, 46, .5)";
+    setTimeout(() => { el.style.transition = "background .5s"; el.style.background = ""; }, 150);
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      try {
+        // 剪贴板 API 不可用（file:// 等）时的降级
+        const ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta);
+        ta.select(); ok = document.execCommand("copy"); ta.remove();
+      } catch { ok = false; }
+    }
+    showCopyToast(ok ? "已复制 " + text : "复制失败（浏览器剪贴板权限被拒），请手动复制");
+  });
+});
+
 /* ================= 页签 ================= */
 function switchTab(pageId) {
   for (const t of document.querySelectorAll("nav .tab"))
     t.classList.toggle("active", t.dataset.page === pageId);
   $("settingsPage").style.display = pageId === "settingsPage" ? "" : "none";
   $("personaPage").style.display = pageId === "personaPage" ? "flex" : "none";
+  $("promptsPage").style.display = pageId === "promptsPage" ? "" : "none";
+  // 占位符悬浮窗只在提示词结构页签显示
+  $("placeholderPanel").style.display = pageId === "promptsPage" ? "" : "none";
 }
 for (const t of document.querySelectorAll("nav .tab"))
   t.addEventListener("click", () => {
     if (t.dataset.page === "personaPage") collectSettingsForm();
+    if (t.dataset.page !== "promptsPage") collectPromptsForm();
     switchTab(t.dataset.page);
   });
 
