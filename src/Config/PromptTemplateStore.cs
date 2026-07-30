@@ -12,16 +12,16 @@ namespace MystiaAI.Config;
 /// <summary>
 /// 提示词模板存储（文档/MystiaAI/prompts.json）。
 /// system：NPC 台词生成的 system 模板；systemReplyOptions：玩家回复选项生成的 system 模板。
-/// 占位符为英文花括号（如 {characterName}），生成时替换；未知占位符原样保留并记一次 Warning。
+/// 变量为英文花括号（如 {characterName}），生成时替换；未知变量原样保留并记一次 Warning。
 /// 文件不存在/读取失败时用内置默认模板（即历史上硬编码的文案），热重载节流 2 秒。
 /// </summary>
 public sealed class PromptTemplateStore
 {
     public static readonly string StoreFile = Path.Combine(Settings.StoreDir, "prompts.json");
 
-    /// <summary>内置默认：NPC 台词 system 模板（与旧版硬编码文案一致）。</summary>
+    /// <summary>内置默认：NPC 台词 system 模板（与旧版硬编码文案一致 + {bondTone} 挂点）。</summary>
     public const string DefaultSystem =
-        "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。" +
+        "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。{bondTone}" +
         "扮演规则：" +
         "1.贴合原作风格，不OOC，不使用网络流行语；" +
         "2.台词贴合角色性格，使用短句和口语；" +
@@ -46,14 +46,14 @@ public sealed class PromptTemplateStore
         "只输出这一句台词本身。";
 
     public const string DefaultUserDaySingle =
-        "{situationLine}和她随口闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
+        "{situationLine}和她随口闲聊一句。\n{news}{playerReply}";
 
     public const string DefaultUserNightChat =
-        "{situationLine}随口和老板娘闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
+        "{situationLine}随口和老板娘闲聊一句。\n{news}{playerReply}";
 
     public const string DefaultUserEvaluation =
         "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。" +
-        "说出一句符合该评价的感想。你与老板娘的羁绊等级：{kizunaLevel}。\n{news}";
+        "说出一句符合该评价的感想。\n{news}";
 
     public const string DefaultUserReplyOptions =
         "{mystiaSituationLine}\n{news}{transcript}\n" +
@@ -114,7 +114,7 @@ public sealed class PromptTemplateStore
             var key = m.Groups[1].Value;
             if (vars.TryGetValue(key, out var value)) return value;
             if (_warnedUnknown.Add(key))
-                _log?.LogWarning($"[MystiaAI] 提示词模板含未知占位符 {{{key}}}，已原样保留");
+                _log?.LogWarning($"[MystiaAI] 提示词模板含未知变量 {{{key}}}，已原样保留");
             return m.Value;
         });
     }

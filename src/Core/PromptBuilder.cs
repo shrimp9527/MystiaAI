@@ -24,7 +24,7 @@ public sealed class ChatMessage
 /// <summary>
 /// 把 GenerationContext + 人设拼成 chat completions 的 messages（system + user）。
 /// 客户端只负责发送，不在这里之外拼 prompt。
-/// system 走 prompts.json 模板（占位符：characterName/persona/language/maxLength/bondTone），
+/// system 走 prompts.json 模板（变量：characterName/persona/language/maxLength/bondTone），
 /// 模板缺失时用内置默认（与本类旧硬编码文案一致）。
 /// </summary>
 public static class PromptBuilder
@@ -201,7 +201,7 @@ public static class PromptBuilder
             : $"现在是{context.GameTime}，{sceneDesc}。";
     }
 
-    /// <summary>场景描述（不含时间，供 {scene} 占位符与情境行共用）。</summary>
+    /// <summary>场景描述（不含时间，供 {scene} 变量与情境行共用）。</summary>
     private static string SceneDesc(GenerationContext context)
     {
         switch (context.Scene)
@@ -214,24 +214,33 @@ public static class PromptBuilder
     }
 
     /// <summary>
-    /// 组装全部占位符变量（system/user 模板共用一份）。
+    /// 组装全部模板变量（system/user 模板共用一份）。
     /// user 专用键（transcript/targetOriginal/dish/rating/news/playerReply 等）也在此取好。
     /// </summary>
     private static Dictionary<string, string> BuildVars(GenerationContext context, string persona, string language, int max)
     {
+        // 羁绊语气提示词：开关关闭时恒为空；key 解析与人设同口径（characterKey 优先，退回显示名）
+        var bondTone = string.Empty;
+        if (PluginContext.Settings.BondPromptEnabled)
+        {
+            var bondKey = context.Extra.TryGetValue("characterKey", out var ck) && !string.IsNullOrWhiteSpace(ck)
+                ? ck
+                : context.CharacterName;
+            bondTone = PluginContext.Personas.GetBondTone(bondKey, context.KizunaLevel);
+        }
+
         return new Dictionary<string, string>
         {
             ["characterName"] = context.CharacterName ?? string.Empty,
             ["persona"] = persona ?? string.Empty,
             ["language"] = language,
             ["maxLength"] = max.ToString(),
-            ["bondTone"] = string.Empty, // 羁绊等级语气提示词（占位，后续需求接入）
+            ["bondTone"] = bondTone,
             ["gameTime"] = context.GameTime ?? string.Empty,
             ["location"] = LocationText(context),
             ["scene"] = SceneDesc(context),
             ["situationLine"] = BuildSituationLine(context),
             ["mystiaSituationLine"] = BuildMystiaSituationLine(context),
-            ["kizunaLevel"] = context.KizunaLevel.ToString(),
             ["transcript"] = Extra(context, "transcript"),
             ["targetOriginal"] = Extra(context, "targetOriginal"),
             ["dish"] = ExtraOr(context, "dish", "料理"),
