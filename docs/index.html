@@ -87,7 +87,7 @@
   .field input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
   .field input[type=checkbox]:checked::after { left: 19px; background: #fff; }
   .hint { font-size: 12px; color: var(--dim); margin: -7px 0 13px 182px; max-width: 520px; }
-  /* 提示词页与占位符悬浮窗：说明通栏左对齐，不吃设置页的 182px 标签缩进 */
+  /* 提示词页与变量悬浮窗：说明通栏左对齐，不吃设置页的 182px 标签缩进 */
   #promptsPage .hint, #placeholderPanel .hint { margin: -7px 0 13px 0; max-width: none; }
 
   /* 角色设定页 */
@@ -128,7 +128,7 @@
     border-radius: 6px; padding: 12px 14px; font-size: 14px; line-height: 1.8; resize: none;
     font-family: inherit;
   }
-  /* 提示词编辑框：底层高亮层 + 上层透明 textarea（caret 可见），实现占位符着色 */
+  /* 提示词编辑框：底层高亮层 + 上层透明 textarea（caret 可见），实现变量着色 */
   .editor-wrap { position: relative; margin-bottom: 14px; text-align: left; }
   .editor-backdrop, .prompt-editor {
     font-family: inherit; font-size: 13.5px; line-height: 1.8;
@@ -139,7 +139,7 @@
     position: absolute; inset: 0; background: #fff;
     border: 1px solid var(--border); overflow: hidden; pointer-events: none;
   }
-  .editor-highlight { white-space: pre-wrap; word-wrap: break-word; color: var(--text); min-height: 100%; padding-right: 17px; }
+  .editor-highlight { white-space: pre-wrap; word-wrap: break-word; color: var(--text); min-height: 100%; }
   .editor-highlight .tok-known { color: #2563eb; }
   .editor-highlight .tok-unknown { color: #b03a2a; }
   .prompt-editor {
@@ -167,6 +167,18 @@
     padding: 8px 16px; border-radius: 6px; font-size: 13px; opacity: 0;
     transition: opacity .2s; pointer-events: none; z-index: 999;
   }
+  .subtabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .subtab {
+    padding: 6px 14px; font-size: 13.5px; cursor: pointer; color: var(--dim);
+    border-bottom: 2px solid transparent; user-select: none;
+  }
+  .subtab:hover { color: var(--text); }
+  .subtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  #bondBanner {
+    background: rgba(176, 58, 42, .1); border: 1px solid #b03a2a; color: #b03a2a;
+    border-radius: 6px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 16px;
+  }
+  .bond-input { width: 420px; }
   #charEditor textarea:focus { outline: none; border-color: var(--accent); }
   .placeholder-warn { color: #b03a2a; font-size: 12px; }
 
@@ -213,14 +225,16 @@
     <div class="field"><label>模型</label><input type="text" id="s_model"></div>
     <div class="field"><label>最大字数（默认 50）</label><input type="number" id="s_maxLength" min="5" max="500"></div>
     <div class="field"><label>超时时间（秒）</label><input type="number" id="s_timeout" min="1" max="120" step="0.5"></div>
-    <div class="field"><label>温度（默认 0.8）</label><input type="number" id="s_temperature" min="0" max="2" step="0.05"></div>
-    <div class="hint">越低越稳定守规矩，越高越发散；AI 答非所问时可适当调低</div>
-    <div class="field"><label>流式显示（默认关）</label><input type="checkbox" id="s_streaming"></div>
+    <div class="field"><label>温度</label><input type="range" id="s_temperature" min="0" max="2" step="0.05" value="0.8" style="width:300px"></div>
+    <div class="hint">越低越稳定守规矩，越高越发散（当前 <span id="s_tempVal">0.8</span>）；AI 答非所问时可适当调低</div>
+    <div class="field"><label>流式显示</label><input type="checkbox" id="s_streaming"></div>
     <div class="hint">开启后游戏内边生成边显示；不稳定，建议保持关闭</div>
-    <div class="field"><label>报纸话题频率（<span id="s_newsFreqVal">30</span>%）</label><input type="range" id="s_newsFrequency" min="0" max="100" step="5"></div>
-    <div class="hint">AI 闲聊时引用当日《文文新闻》的概率；0 为完全不提，100 为每次都提</div>
-    <div class="field"><label>提到「报纸」时必注入报纸内容（默认开）</label><input type="checkbox" id="s_newsKeyword" checked></div>
+    <div class="field"><label>报纸话题频率</label><input type="range" id="s_newsFrequency" min="0" max="100" step="5" value="30" style="width:300px"></div>
+    <div class="hint">AI 闲聊时引用当日《文文新闻》的概率（当前 <span id="s_newsFreqVal">30</span>%）；0 为完全不提，100 为每次都提</div>
+    <div class="field"><label>提到「报纸」时必注入报纸内容</label><input type="checkbox" id="s_newsKeyword" checked></div>
     <div class="hint">玩家输入包含「报纸/新闻」等词时，必定把当日报纸内容发给 AI，保证能就报纸作答；关闭后只按上面的概率注入</div>
+    <div class="field"><label>启用羁绊提示词</label><input type="checkbox" id="s_bondEnabled"></div>
+    <div class="hint">开启后 {bondTone} 变量按羁绊等级注入你在「提示词结构 → 羁绊提示词」里配置的内容；关闭时该变量恒为空</div>
   </div>
 
   <!-- ============ 角色设定 ============ -->
@@ -256,34 +270,61 @@
 
   <!-- ============ 提示词结构 ============ -->
   <div id="promptsPage" class="card" style="display:none">
-    <h2>System 提示词（NPC 台词生成）</h2>
-    <div class="hint">每条 NPC 台词/闲聊/评价生成时使用的 system 指令，留空字段会回退内置默认</div>
-    <textarea id="p_system" class="prompt-editor" placeholder="System 提示词模板…"></textarea>
-    <h2>System 提示词（玩家回复选项生成）</h2>
-    <div class="hint">生成「AI 建议回复」按钮内容时使用的 system 指令</div>
-    <textarea id="p_systemReplyOptions" class="prompt-editor" placeholder="回复选项 System 提示词模板…"></textarea>
-    <h2>User 提示词（白天对话·连贯改写）</h2>
-    <div class="hint">白天多句对话中逐句生成 NPC 台词时使用（带完整对话记录）</div>
-    <textarea id="p_userDayChat" class="prompt-editor"></textarea>
-    <h2>User 提示词（白天单句）</h2>
-    <div class="hint">白天每轮首句、无对话记录时使用</div>
-    <textarea id="p_userDaySingle" class="prompt-editor"></textarea>
-    <h2>User 提示词（营业闲聊）</h2>
-    <div class="hint">营业时间稀客/普客的闲聊与头顶气泡使用</div>
-    <textarea id="p_userNightChat" class="prompt-editor"></textarea>
-    <h2>User 提示词（上菜评价）</h2>
-    <div class="hint">客人吃完料理后的评价语使用</div>
-    <textarea id="p_userEvaluation" class="prompt-editor"></textarea>
-    <h2>User 提示词（AI 建议回复选项）</h2>
-    <div class="hint">生成输入框旁两个推荐回复按钮内容时使用</div>
-    <textarea id="p_userReplyOptions" class="prompt-editor"></textarea>
+    <div class="subtabs">
+      <div class="subtab active" data-ptab="sys">System 提示词</div>
+      <div class="subtab" data-ptab="user">User 提示词</div>
+      <div class="subtab" data-ptab="bond">羁绊提示词</div>
+    </div>
+    <div id="ptabSys">
+      <h2>System 提示词（NPC 台词生成）</h2>
+      <div class="hint">每条 NPC 台词/闲聊/评价生成时使用的 system 指令，留空字段会回退内置默认</div>
+      <textarea id="p_system" class="prompt-editor" placeholder="System 提示词模板…"></textarea>
+      <h2>System 提示词（玩家回复选项生成）</h2>
+      <div class="hint">生成「AI 建议回复」按钮内容时使用的 system 指令</div>
+      <textarea id="p_systemReplyOptions" class="prompt-editor" placeholder="回复选项 System 提示词模板…"></textarea>
+    </div>
+    <div id="ptabUser" style="display:none">
+      <h2>User 提示词（白天对话·连贯改写）</h2>
+      <div class="hint">白天多句对话中逐句生成 NPC 台词时使用（带完整对话记录）</div>
+      <textarea id="p_userDayChat" class="prompt-editor"></textarea>
+      <h2>User 提示词（白天单句）</h2>
+      <div class="hint">白天每轮首句、无对话记录时使用</div>
+      <textarea id="p_userDaySingle" class="prompt-editor"></textarea>
+      <h2>User 提示词（营业闲聊）</h2>
+      <div class="hint">营业时间稀客/普客的闲聊与头顶气泡使用</div>
+      <textarea id="p_userNightChat" class="prompt-editor"></textarea>
+      <h2>User 提示词（上菜评价）</h2>
+      <div class="hint">客人吃完料理后的评价语使用</div>
+      <textarea id="p_userEvaluation" class="prompt-editor"></textarea>
+      <h2>User 提示词（AI 建议回复选项）</h2>
+      <div class="hint">生成输入框旁两个推荐回复按钮内容时使用</div>
+      <textarea id="p_userReplyOptions" class="prompt-editor"></textarea>
+    </div>
+    <div id="ptabBond" style="display:none">
+      <div id="bondBanner" style="display:none">⚠ 羁绊提示词未启用——请到「通用设置」勾选「启用羁绊提示词」，本页配置才会生效</div>
+      <h2>全局兜底（所有角色通用）</h2>
+      <div class="hint">角色未配置对应等级的专属提示词时回退到这里；留空的等级不注入</div>
+      <div class="field"><label>羁绊 1 级</label><input type="text" id="b_global_1" class="bond-input" placeholder="如：刚认识，说话生疏客气"></div>
+      <div class="field"><label>羁绊 2 级</label><input type="text" id="b_global_2" class="bond-input"></div>
+      <div class="field"><label>羁绊 3 级</label><input type="text" id="b_global_3" class="bond-input"></div>
+      <div class="field"><label>羁绊 4 级</label><input type="text" id="b_global_4" class="bond-input"></div>
+      <div class="field"><label>羁绊 5 级</label><input type="text" id="b_global_5" class="bond-input" placeholder="如：已是挚友，说话毫无拘束"></div>
+      <h2>角色专属（稀客）</h2>
+      <div class="hint">优先级高于全局兜底；留空的等级回退到全局兜底</div>
+      <div class="field"><label>角色</label><select id="b_char"></select></div>
+      <div class="field"><label>羁绊 1 级</label><input type="text" id="b_char_1" class="bond-input"></div>
+      <div class="field"><label>羁绊 2 级</label><input type="text" id="b_char_2" class="bond-input"></div>
+      <div class="field"><label>羁绊 3 级</label><input type="text" id="b_char_3" class="bond-input"></div>
+      <div class="field"><label>羁绊 4 级</label><input type="text" id="b_char_4" class="bond-input"></div>
+      <div class="field"><label>羁绊 5 级</label><input type="text" id="b_char_5" class="bond-input"></div>
+    </div>
   </div>
 </main>
 
-<!-- 占位符速查：悬浮窗（固定于视口右侧，不随页面滚动；仅在提示词结构页签显示） -->
+<!-- 变量速查：悬浮窗（固定于视口右侧，不随页面滚动；仅在提示词结构页签显示） -->
 <div id="placeholderPanel" class="card" style="display:none">
-  <h2>可用占位符</h2>
-  <div class="hint">括号内中文仅为辅助理解，实际调用名是英文花括号形式；<b>点击占位符即可复制</b>。写错名字会原样保留并在游戏日志提示一次。后续版本会补充更多可配置项。</div>
+  <h2>可用变量</h2>
+  <div class="hint">括号内中文仅为辅助理解，实际调用名是英文花括号形式；<b>点击变量即可复制</b>。写错名字会原样保留并在游戏日志提示一次。后续版本会补充更多可配置项。</div>
   <table id="placeholderTable">
     <tr><td><code class="ph">{characterName}</code><span class="phDesc">角色名（当前说话的角色显示名）</span></td></tr>
     <tr><td><code class="ph">{persona}</code><span class="phDesc">该角色人设（仅 System 模板有效）</span></td></tr>
@@ -298,8 +339,7 @@
     <tr><td><code class="ph">{npcLine}</code><span class="phDesc">最近一句 NPC 台词（仅回复选项用）</span></td></tr>
     <tr><td><code class="ph">{dish}</code><span class="phDesc">菜品名（仅上菜评价）</span></td></tr>
     <tr><td><code class="ph">{rating}</code><span class="phDesc">评价等级（仅上菜评价）</span></td></tr>
-    <tr><td><code class="ph">{kizunaLevel}</code><span class="phDesc">羁绊等级（数字）</span></td></tr>
-    <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（预留，后续版本接入）</span></td></tr>
+    <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（「提示词结构 → 羁绊提示词」中按 1~5 级配置，需在通用设置开启后生效）</span></td></tr>
     <tr><td><code class="ph">{news}</code><span class="phDesc">当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）</span></td></tr>
     <tr><td><code class="ph">{language}</code><span class="phDesc">游戏语言（跟随游戏设置）</span></td></tr>
     <tr><td><code class="ph">{maxLength}</code><span class="phDesc">字数上限（通用设置里的最大字数）</span></td></tr>
@@ -968,16 +1008,17 @@ function defaultSettings() {
     "maxLength": 50, "streaming": false, "timeoutSeconds": 10,
     "temperature": 0.8,
     "newsFrequency": 30, "newsKeywordTrigger": true,
+    "bondPromptEnabled": false,
   };
 }
 
 // 与 mod 端 PromptTemplateStore 的内置默认完全一致
-const DEFAULT_PROMPT_SYSTEM = "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。扮演规则：1.贴合原作风格，不OOC，不使用网络流行语；2.台词贴合角色性格，使用短句和口语；3.人设资料中包含该角色的档案与原版点餐/评价对话范本，参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；4.仅输出角色台词本身，不含旁白、引号与额外说明。以该角色的口吻说一句话。要求：使用{language}；不超过{maxLength}字。";
+const DEFAULT_PROMPT_SYSTEM = "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。{bondTone}扮演规则：1.贴合原作风格，不OOC，不使用网络流行语；2.台词贴合角色性格，使用短句和口语；3.人设资料中包含该角色的档案与原版点餐/评价对话范本，参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；4.仅输出角色台词本身，不含旁白、引号与额外说明。以该角色的口吻说一句话。要求：使用{language}；不超过{maxLength}字。";
 const DEFAULT_PROMPT_REPLY = "你正在扮演米斯蒂娅·萝蕾拉——《东方夜雀食堂》的主角，开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {characterName}。";
 const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
-const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
-const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。你与她的羁绊等级：{kizunaLevel}。\n{news}{playerReply}";
-const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。你与老板娘的羁绊等级：{kizunaLevel}。\n{news}";
+const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{playerReply}";
+const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{playerReply}";
+const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。\n{news}";
 const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
 function defaultPrompts() {
@@ -1252,10 +1293,12 @@ function fillSettingsForm() {
   $("s_maxLength").value = d.maxLength ?? 50;
   $("s_timeout").value = d.timeoutSeconds ?? 10;
   $("s_temperature").value = d.temperature ?? 0.8;
+  $("s_tempVal").textContent = d.temperature ?? 0.8;
   $("s_streaming").checked = d.streaming === true;
   $("s_newsFrequency").value = d.newsFrequency ?? 30;
   $("s_newsFreqVal").textContent = d.newsFrequency ?? 30;
   $("s_newsKeyword").checked = d.newsKeywordTrigger !== false;
+  $("s_bondEnabled").checked = d.bondPromptEnabled === true;
 }
 
 function collectSettingsForm() {
@@ -1273,6 +1316,7 @@ function collectSettingsForm() {
     streaming: $("s_streaming").checked,
     newsFrequency: Math.min(100, Math.max(0, parseInt($("s_newsFrequency").value, 10) || 0)),
     newsKeywordTrigger: $("s_newsKeyword").checked,
+    bondPromptEnabled: $("s_bondEnabled").checked,
   });
   settingsState.data._meta = { tool: "MystiaAI", kind: "settings", version: "1" };
 }
@@ -1291,9 +1335,10 @@ $("s_provider").addEventListener("change", () => {
   }
   markDirty(settingsState);
 });
-for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_temperature","s_streaming","s_newsFrequency","s_newsKeyword"])
+for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_temperature","s_streaming","s_newsFrequency","s_newsKeyword","s_bondEnabled"])
   $(id).addEventListener("change", () => markDirty(settingsState));
 $("s_newsFrequency").addEventListener("input", () => { $("s_newsFreqVal").textContent = $("s_newsFrequency").value; });
+$("s_temperature").addEventListener("input", () => { $("s_tempVal").textContent = $("s_temperature").value; });
 
 /* ================= 角色设定页 ================= */
 function normalizePersonas() {
@@ -1476,11 +1521,11 @@ for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDa
   "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"])
   $(id).addEventListener("input", () => { collectPromptsForm(); markDirty(promptsState); });
 
-/* ================= 占位符语法高亮（已知蓝 / 未知红） ================= */
+/* ================= 变量语法高亮（已知蓝 / 未知红） ================= */
 const KNOWN_PLACEHOLDERS = new Set([
   "characterName", "persona", "gameTime", "location", "scene", "situationLine",
   "mystiaSituationLine", "transcript", "targetOriginal", "playerReply", "npcLine",
-  "dish", "rating", "kizunaLevel", "bondTone", "news", "language", "maxLength", "optionCount",
+  "dish", "rating", "bondTone", "news", "language", "maxLength", "optionCount",
 ]);
 
 function escapeHtml(s) {
@@ -1508,7 +1553,17 @@ function highlightPromptEditor(ta) {
       ? `<span class="tok-known">${m}</span>`
       : `<span class="tok-unknown">${m}</span>`);
   hl.innerHTML = html + "\n";
+  // 滚动条宽度按环境实测（offsetWidth - clientWidth = 滚动条+边框差），
+  // 写死补偿值会导致高亮层与文本框折行错位、句末文字点不中
+  hl.style.paddingRight = Math.max(0, ta.offsetWidth - ta.clientWidth - 2) + "px";
   hl.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+}
+
+// 页面/子页签从 display:none 变为可见后必须重算（隐藏时布局全为 0，测量会错位）
+function reHighlightAllPromptEditors() {
+  for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDaySingle",
+    "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"])
+    highlightPromptEditor($(id));
 }
 
 for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDaySingle",
@@ -1519,7 +1574,86 @@ for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDa
   highlightPromptEditor(ta);
 }
 
-/* ================= 占位符点击复制 ================= */
+/* ================= 提示词结构子分类 + 羁绊提示词 ================= */
+for (const t of document.querySelectorAll(".subtab"))
+  t.addEventListener("click", () => switchPromptTab(t.dataset.ptab));
+
+function switchPromptTab(ptab) {
+  for (const t of document.querySelectorAll(".subtab"))
+    t.classList.toggle("active", t.dataset.ptab === ptab);
+  $("ptabSys").style.display = ptab === "sys" ? "" : "none";
+  $("ptabUser").style.display = ptab === "user" ? "" : "none";
+  $("ptabBond").style.display = ptab === "bond" ? "" : "none";
+  // 羁绊提示词不支持变量替换，该页签下隐藏变量悬浮窗
+  $("placeholderPanel").style.display = ptab === "bond" ? "none" : "";
+  if (ptab === "bond") refreshBondTab();
+  // 子页签切换后编辑区重新可见，重算高亮防错位
+  requestAnimationFrame(reHighlightAllPromptEditors);
+}
+
+async function refreshBondTab() {
+  // 设置文件可能被工具外部修改（用户手改 settings.json）：进羁绊页前重读一次
+  if (dirHandle) {
+    try {
+      const text = await (await dirHandle.getFileHandle("settings.json")).getFile().then(f => f.text());
+      const d = JSON.parse(text);
+      if (settingsState.data) Object.assign(settingsState.data, d);
+    } catch { /* 读不到就沿用内存状态 */ }
+  }
+  // 未开启时显示显眼横幅
+  $("bondBanner").style.display =
+    (settingsState.data && settingsState.data.bondPromptEnabled === true) ? "none" : "";
+  const d = personasState.data;
+  if (!d) return;
+  d.bondGlobal = d.bondGlobal || {};
+  for (let i = 1; i <= 5; i++) $("b_global_" + i).value = d.bondGlobal[String(i)] || "";
+  // 角色下拉（稀客，按显示名排序，保留原选择）
+  const sel = $("b_char");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const entries = Object.entries(d.characters || {})
+    .filter(([, e]) => e.category === "SpecialGuest")
+    .sort((a, b) => (a[1].displayName || a[0]).localeCompare(b[1].displayName || b[0], "zh"));
+  for (const [key, e] of entries) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = (e.displayName || key) + (e.label ? `（${e.label}）` : "");
+    sel.appendChild(opt);
+  }
+  if (prev && entries.some(([k]) => k === prev)) sel.value = prev;
+  fillBondCharForm();
+}
+
+function fillBondCharForm() {
+  const d = personasState.data;
+  const key = $("b_char").value;
+  const e = d && d.characters && d.characters[key];
+  const bp = (e && e.bondPrompts) || {};
+  for (let i = 1; i <= 5; i++) $("b_char_" + i).value = bp[String(i)] || "";
+}
+
+$("b_char").addEventListener("change", fillBondCharForm);
+
+for (let i = 1; i <= 5; i++) {
+  $("b_global_" + i).addEventListener("change", () => {
+    const d = personasState.data; if (!d) return;
+    d.bondGlobal = d.bondGlobal || {};
+    const v = $("b_global_" + i).value.trim();
+    if (v) d.bondGlobal[String(i)] = v; else delete d.bondGlobal[String(i)];
+    markDirty(personasState);
+  });
+  $("b_char_" + i).addEventListener("change", () => {
+    const d = personasState.data; if (!d) return;
+    const key = $("b_char").value;
+    const e = d.characters && d.characters[key]; if (!e) return;
+    e.bondPrompts = e.bondPrompts || {};
+    const v = $("b_char_" + i).value.trim();
+    if (v) e.bondPrompts[String(i)] = v; else delete e.bondPrompts[String(i)];
+    markDirty(personasState);
+  });
+}
+
+/* ================= 变量点击复制 ================= */
 function showCopyToast(text) {
   let t = $("copyToast");
   if (!t) {
@@ -1562,8 +1696,12 @@ function switchTab(pageId) {
   $("settingsPage").style.display = pageId === "settingsPage" ? "" : "none";
   $("personaPage").style.display = pageId === "personaPage" ? "flex" : "none";
   $("promptsPage").style.display = pageId === "promptsPage" ? "" : "none";
-  // 占位符悬浮窗只在提示词结构页签显示
-  $("placeholderPanel").style.display = pageId === "promptsPage" ? "" : "none";
+  // 变量悬浮窗只在提示词结构页签显示（且羁绊子页签下隐藏）
+  const activePtab = (document.querySelector(".subtab.active") || {}).dataset?.ptab;
+  $("placeholderPanel").style.display =
+    (pageId === "promptsPage" && activePtab !== "bond") ? "" : "none";
+  // 页签从隐藏变为可见后重算高亮（隐藏时布局为 0，滚动条补偿会测错）
+  if (pageId === "promptsPage") requestAnimationFrame(reHighlightAllPromptEditors);
 }
 for (const t of document.querySelectorAll("nav .tab"))
   t.addEventListener("click", () => {

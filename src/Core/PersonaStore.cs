@@ -133,6 +133,50 @@ public sealed class PersonaStore
     public static bool IsUsable(string? persona)
         => !string.IsNullOrWhiteSpace(persona) && !persona.TrimStart().StartsWith(Placeholder);
 
+    /// <summary>
+    /// 取羁绊等级语气提示词（{bondTone} 变量）：角色专属（精确 key → label 匹配 → 别名换算）
+    /// → 全局兜底 → 空串。level 不在 1~5（普客/未收录为 0）直接返回空串，不回退分类。
+    /// </summary>
+    public string GetBondTone(string? characterKey, int level)
+    {
+        if (level < 1 || level > 5) return string.Empty;
+        var lv = level.ToString();
+        ReloadIfChanged();
+        lock (_gate)
+        {
+            var file = EnsureLoaded();
+            file.BondGlobal ??= new Dictionary<string, string>();
+
+            PersonaEntry? entry = null;
+            if (!string.IsNullOrWhiteSpace(characterKey))
+            {
+                if (file.Characters.TryGetValue(characterKey, out var e1)) entry = e1;
+                else
+                {
+                    foreach (var (_, e) in file.Characters)
+                    {
+                        if (!string.IsNullOrEmpty(e.Label) && e.Label == characterKey) { entry = e; break; }
+                    }
+                    if (entry == null)
+                    {
+                        var cn = ResolveAlias(characterKey);
+                        if (cn != null && file.Characters.TryGetValue(cn, out var e2)) entry = e2;
+                    }
+                }
+            }
+
+            if (entry?.BondPrompts != null
+                && entry.BondPrompts.TryGetValue(lv, out var tone)
+                && !string.IsNullOrWhiteSpace(tone))
+            {
+                return tone.Trim();
+            }
+            if (file.BondGlobal.TryGetValue(lv, out var globalTone) && !string.IsNullOrWhiteSpace(globalTone))
+                return globalTone.Trim();
+            return string.Empty;
+        }
+    }
+
     /* ================= 别名表（stringId → 中文名） ================= */
 
     /// <summary>
@@ -373,6 +417,7 @@ public sealed class PersonaStore
                    ?? throw new FormatException("personas.json 不是有效的 v2 结构");
             file.Categories ??= new Dictionary<string, string>();
             file.Characters ??= new Dictionary<string, PersonaEntry>();
+            file.BondGlobal ??= new Dictionary<string, string>();
         }
 
         // 旧英文 key → 中文名 key 迁移（预置别名覆盖的角色）
@@ -464,6 +509,7 @@ public sealed class PersonaStore
         if (file == null) throw new FormatException("内置 personas.default.json 解析失败");
         file.Categories ??= new Dictionary<string, string>();
         file.Characters ??= new Dictionary<string, PersonaEntry>();
+        file.BondGlobal ??= new Dictionary<string, string>();
         return file;
     }
 
@@ -487,6 +533,9 @@ public sealed class PersonaStore
         [JsonPropertyName("categories")] public Dictionary<string, string> Categories { get; set; } = new();
         [JsonPropertyName("characters")] public Dictionary<string, PersonaEntry> Characters { get; set; } = new();
 
+        /// <summary>全局兜底羁绊提示词（key 为 "1"~"5"）：角色无专属提示词时回退到此。</summary>
+        [JsonPropertyName("bondGlobal")] public Dictionary<string, string> BondGlobal { get; set; } = new();
+
         /// <summary>加载过程中发生过迁移/补齐（不序列化，仅内存标记，提示调用方写回）。</summary>
         [JsonIgnore] public bool Dirty { get; set; }
     }
@@ -502,5 +551,8 @@ public sealed class PersonaStore
 
         /// <summary>游戏内数字 id（稀客 id）。仅作展示/参考，查找不使用。</summary>
         [JsonPropertyName("id")] public int? Id { get; set; }
+
+        /// <summary>羁绊 1~5 级语气提示词（key 为 "1"~"5"）。可选，空/缺失=无专属提示词。</summary>
+        [JsonPropertyName("bondPrompts")] public Dictionary<string, string>? BondPrompts { get; set; }
     }
 }
