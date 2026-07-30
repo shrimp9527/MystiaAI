@@ -28,7 +28,7 @@
 - 语言自动跟随游戏设置（简中/繁中/英/日/韩）
 ## 运行环境
 
-- 游戏：Steam 版《东方夜雀食堂》（Unity 2021.3.28f1，IL2CPP 后端）
+- 游戏：Steam 版《东方夜雀食堂》（4.4.0e）
 - 系统：Windows x64
 - 加载器：BepInEx 6 IL2CPP 版（BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785 或更新的 bleeding edge 构建，[官方下载页](https://builds.bepinex.dev/projects/bepinex_be)）
 - AI 服务：任一 OpenAI 兼容的 chat completions 接口，需自备 API Key
@@ -43,7 +43,7 @@
 
 ## 配置
 
-配置文件位于 `文档/MystiaAI/`（不放游戏目录，是为了让浏览器可以正常访问）：
+配置文件位于 `文档/MystiaAI/`：
 
 - `settings.json`：开关、供应商、API Key、模型、字数上限、超时、温度、报纸话题频率与关键词触发开关等
 - `personas.json`：全部角色人设，按中文名组织，可逐角色编辑（Label/ID 由游戏自动回填）
@@ -86,7 +86,6 @@
 
   -夜雀助手（东方夜雀食堂小助手）
    https://izakaya.cc/
-
    二创游戏《东方夜雀食堂》的辅助百科，
    提供了游戏中稀客与普客的人物介绍、出没地区、
    预算、喜好标签、符卡效果、点餐与评价对话等
