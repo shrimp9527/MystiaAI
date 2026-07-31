@@ -235,6 +235,10 @@
     <div class="hint">玩家输入包含「报纸/新闻」等词时，必定把当日报纸内容发给 AI，保证能就报纸作答；关闭后只按上面的概率注入</div>
     <div class="field"><label>启用羁绊提示词</label><input type="checkbox" id="s_bondEnabled"></div>
     <div class="hint">开启后 {bondTone} 变量按羁绊等级注入你在「提示词结构 → 羁绊提示词」里配置的内容；关闭时该变量恒为空</div>
+    <div class="field"><label>长期记忆（默认开）</label><input type="checkbox" id="s_memoryEnabled" checked></div>
+    <div class="hint">NPC 会记住与你的过往对话（存于 memories.json），下次见面时自然承接之前聊过的话题；关闭后不记录也不注入</div>
+    <div class="field"><label>每角色保留记忆条数</label><input type="number" id="s_memoryMax" min="1" max="200" step="1" value="10"></div>
+    <div class="field"><label>每次注入记忆条数（0=不注入）</label><input type="number" id="s_memoryInject" min="0" max="20" step="1" value="3"></div>
   </div>
 
   <!-- ============ 角色设定 ============ -->
@@ -341,6 +345,7 @@
     <tr><td><code class="ph">{rating}</code><span class="phDesc">评价等级（仅上菜评价）</span></td></tr>
     <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（「提示词结构 → 羁绊提示词」中按 1~5 级配置，需在通用设置开启后生效）</span></td></tr>
     <tr><td><code class="ph">{news}</code><span class="phDesc">当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）</span></td></tr>
+    <tr><td><code class="ph">{memories}</code><span class="phDesc">该角色与玩家的过往对话记忆（长期记忆，最近 N 条；模板未放置时自动追加到末尾）</span></td></tr>
     <tr><td><code class="ph">{language}</code><span class="phDesc">游戏语言（跟随游戏设置）</span></td></tr>
     <tr><td><code class="ph">{maxLength}</code><span class="phDesc">字数上限（通用设置里的最大字数）</span></td></tr>
     <tr><td><code class="ph">{optionCount}</code><span class="phDesc">建议回复条数（仅回复选项用）</span></td></tr>
@@ -1015,11 +1020,11 @@ function defaultSettings() {
 // 与 mod 端 PromptTemplateStore 的内置默认完全一致
 const DEFAULT_PROMPT_SYSTEM = "你正在扮演《东方夜雀食堂》中的角色 {characterName}。{persona}。{bondTone}扮演规则：1.贴合原作风格，不OOC，不使用网络流行语；2.台词贴合角色性格，使用短句和口语；3.人设资料中包含该角色的档案与原版点餐/评价对话范本，参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；4.仅输出角色台词本身，不含旁白、引号与额外说明。以该角色的口吻说一句话。要求：使用{language}；不超过{maxLength}字。";
 const DEFAULT_PROMPT_REPLY = "你正在扮演米斯蒂娅·萝蕾拉——《东方夜雀食堂》的主角，开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {characterName}。";
-const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
-const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{playerReply}";
-const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{playerReply}";
-const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。\n{news}";
-const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
+const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{memories}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
+const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{memories}{playerReply}";
+const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
+const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。\n{news}{memories}";
+const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{memories}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
 function defaultPrompts() {
   return {
@@ -1299,6 +1304,9 @@ function fillSettingsForm() {
   $("s_newsFreqVal").textContent = d.newsFrequency ?? 30;
   $("s_newsKeyword").checked = d.newsKeywordTrigger !== false;
   $("s_bondEnabled").checked = d.bondPromptEnabled === true;
+  $("s_memoryEnabled").checked = d.memoryEnabled !== false;
+  $("s_memoryMax").value = d.memoryMaxPerCharacter ?? 10;
+  $("s_memoryInject").value = d.memoryInjectCount ?? 3;
 }
 
 function collectSettingsForm() {
@@ -1317,6 +1325,9 @@ function collectSettingsForm() {
     newsFrequency: Math.min(100, Math.max(0, parseInt($("s_newsFrequency").value, 10) || 0)),
     newsKeywordTrigger: $("s_newsKeyword").checked,
     bondPromptEnabled: $("s_bondEnabled").checked,
+    memoryEnabled: $("s_memoryEnabled").checked,
+    memoryMaxPerCharacter: Math.min(200, Math.max(1, parseInt($("s_memoryMax").value, 10) || 10)),
+    memoryInjectCount: Math.min(20, Math.max(0, parseInt($("s_memoryInject").value, 10) || 3)),
   });
   settingsState.data._meta = { tool: "MystiaAI", kind: "settings", version: "1" };
 }
@@ -1525,7 +1536,7 @@ for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDa
 const KNOWN_PLACEHOLDERS = new Set([
   "characterName", "persona", "gameTime", "location", "scene", "situationLine",
   "mystiaSituationLine", "transcript", "targetOriginal", "playerReply", "npcLine",
-  "dish", "rating", "bondTone", "news", "language", "maxLength", "optionCount",
+  "dish", "rating", "bondTone", "news", "memories", "language", "maxLength", "optionCount",
 ]);
 
 function escapeHtml(s) {
