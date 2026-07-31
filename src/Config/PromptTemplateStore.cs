@@ -52,7 +52,7 @@ public sealed class PromptTemplateStore
         "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
 
     public const string DefaultUserEvaluation =
-        "{situationLine}你吃的是「{dish}」{dishDesc}{dishIngredients}，评价等级为「{rating}」。" +
+        "{situationLine}你吃的是「{dish}」{dishDesc}{dishIngredients}，禁止增加未提及的食材，评价等级为「{rating}」。" +
         "{ratingTone}说出一句符合该评价的感想。{memories}";
 
     public const string DefaultUserReplyOptions =

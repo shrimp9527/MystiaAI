@@ -47,7 +47,11 @@ public static class DishInfo
                 if (r != null && r.FoodID == food.Id) { recipe = r; break; }
             }
             var ids = recipe?.Ingredients;
-            if (ids == null || ids.Length == 0) return string.Empty;
+            if (ids == null || ids.Length == 0)
+            {
+                PluginContext.Log.LogInfo($"[MystiaAI] DishInfo: 料理 id={food.Id}（{food.Text?.Name}）未匹配到配方");
+                return string.Empty;
+            }
 
             var sb = new StringBuilder();
             var count = 0;
@@ -68,6 +72,10 @@ public static class DishInfo
                 if (withDesc && !string.IsNullOrWhiteSpace(desc))
                     sb.Append('（').Append(desc.Trim()).Append('）');
             }
+            var foodName = food.Text?.Name;
+            var ingredientsText = sb.Length > 0 ? sb.ToString() : "<无>";
+            PluginContext.Log.LogInfo(
+                $"[MystiaAI] DishInfo: 料理 id={food.Id}（{foodName}）配方 recipeId={recipe!.Id} → 食材[{ingredientsText}]");
             return sb.ToString();
         }
         catch (Exception ex)
