@@ -277,6 +277,7 @@
     <div class="subtabs">
       <div class="subtab active" data-ptab="sys">System 提示词</div>
       <div class="subtab" data-ptab="user">User 提示词</div>
+      <div class="subtab" data-ptab="rating">评价提示词</div>
       <div class="subtab" data-ptab="bond">羁绊提示词</div>
     </div>
     <div id="ptabSys">
@@ -303,6 +304,23 @@
       <h2>User 提示词（AI 建议回复选项）</h2>
       <div class="hint">生成输入框旁两个推荐回复按钮内容时使用</div>
       <textarea id="p_userReplyOptions" class="prompt-editor"></textarea>
+    </div>
+    <div id="ptabRating" style="display:none">
+      <h2>全局兜底（所有角色通用）</h2>
+      <div class="hint">按顾客的评价等级注入对应提示词（{ratingTone} 变量）；角色未配置对应档位时回退到这里，留空的档位不注入</div>
+      <div class="field"><label>极差评价</label><input type="text" id="r_global_1" class="bond-input"></div>
+      <div class="field"><label>差评</label><input type="text" id="r_global_2" class="bond-input"></div>
+      <div class="field"><label>普通评价</label><input type="text" id="r_global_3" class="bond-input"></div>
+      <div class="field"><label>好评</label><input type="text" id="r_global_4" class="bond-input"></div>
+      <div class="field"><label>极好评</label><input type="text" id="r_global_5" class="bond-input"></div>
+      <h2>角色专属（稀客）</h2>
+      <div class="hint">优先级高于全局兜底；留空的档位回退到全局兜底</div>
+      <div class="field"><label>角色</label><select id="r_char"></select></div>
+      <div class="field"><label>极差评价</label><input type="text" id="r_char_1" class="bond-input"></div>
+      <div class="field"><label>差评</label><input type="text" id="r_char_2" class="bond-input"></div>
+      <div class="field"><label>普通评价</label><input type="text" id="r_char_3" class="bond-input"></div>
+      <div class="field"><label>好评</label><input type="text" id="r_char_4" class="bond-input"></div>
+      <div class="field"><label>极好评</label><input type="text" id="r_char_5" class="bond-input"></div>
     </div>
     <div id="ptabBond" style="display:none">
       <div id="bondBanner" style="display:none">⚠ 羁绊提示词未启用——请到「通用设置」勾选「启用羁绊提示词」，本页配置才会生效</div>
@@ -344,6 +362,7 @@
     <tr><td><code class="ph">{dish}</code><span class="phDesc">菜品名（仅上菜评价）</span></td></tr>
     <tr><td><code class="ph">{rating}</code><span class="phDesc">评价等级（仅上菜评价）</span></td></tr>
     <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（「提示词结构 → 羁绊提示词」中按 1~5 级配置，需在通用设置开启后生效）</span></td></tr>
+    <tr><td><code class="ph">{ratingTone}</code><span class="phDesc">评价等级语气提示词（「提示词结构 → 评价提示词」中按五档配置，无开关默认生效）</span></td></tr>
     <tr><td><code class="ph">{news}</code><span class="phDesc">当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）</span></td></tr>
     <tr><td><code class="ph">{memories}</code><span class="phDesc">该角色与玩家的过往对话记忆（长期记忆，最近 N 条；模板未放置时自动追加到末尾）</span></td></tr>
     <tr><td><code class="ph">{language}</code><span class="phDesc">游戏语言（跟随游戏设置）</span></td></tr>
@@ -980,6 +999,13 @@
       "category": "NormalGuest",
       "persona": "# 鸦天狗（普客）\n\n## 人物介绍\n\n谈吐虽然彬彬有礼，却又感觉有点儿强势。这是时常跑外勤的鸦天狗这一类天狗的通性，我实在有些不擅于应付。不过来者是客，我会努力照顾好的！\n\n## 顾客信息\n- **所属DLC**：0\n- **出没地区**：博丽神社、红魔馆、迷途竹林、妖怪之山\n- **喜好料理标签**：高级、招牌、适合拍照、菌类、流行喜爱\n- **喜好酒水标签**：烧酒、清酒\n\n## 点餐对话\n- 秋天的话，妖怪之山的枫叶会非常漂亮。\n- 虽然奇怪的传闻很多…但是我还是很尊重博丽的巫女大人的。\n- 我很喜欢拜访朋友的时候带一些手作食物，不过老板娘应该更擅长这个吧？见笑了。\n- 神秘的洋馆的传闻？你是说北边的那个，还是西边的那个呢？这可是幻想乡。\n- 只要好好去完成客人的要求，就不会被特地刁难。"
     }
+  },
+  "ratingGlobal": {
+    "极差评价": "你气得浑身发抖，觉得这份料理简直是对味蕾的侮辱，怒火中烧、句句带刀，恨不得当场掀桌走人。",
+    "差评": "你有些失望，语气里透着不满，但还愿意给机会。",
+    "普通评价": "你觉得还算过得去，语气平淡随意，不夸也不贬。",
+    "好评": "你心情很好，发自内心地夸奖，语气热络。",
+    "极好评": "你惊得瞪大了眼睛，不敢想象世上竟有如此美味，激动得语无伦次、连连拍桌叫绝，恨不得立刻昭告全幻想乡。"
   }
 }
 </script>
@@ -1023,7 +1049,7 @@ const DEFAULT_PROMPT_REPLY = "你正在扮演米斯蒂娅·萝蕾拉——《东
 const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{memories}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
 const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{memories}{playerReply}";
 const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
-const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。说出一句符合该评价的感想。\n{news}{memories}";
+const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。{ratingTone}说出一句符合该评价的感想。{memories}";
 const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{memories}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
 function defaultPrompts() {
@@ -1536,7 +1562,7 @@ for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDa
 const KNOWN_PLACEHOLDERS = new Set([
   "characterName", "persona", "gameTime", "location", "scene", "situationLine",
   "mystiaSituationLine", "transcript", "targetOriginal", "playerReply", "npcLine",
-  "dish", "rating", "bondTone", "news", "memories", "language", "maxLength", "optionCount",
+  "dish", "rating", "ratingTone", "bondTone", "news", "memories", "language", "maxLength", "optionCount",
 ]);
 
 function escapeHtml(s) {
@@ -1594,12 +1620,68 @@ function switchPromptTab(ptab) {
     t.classList.toggle("active", t.dataset.ptab === ptab);
   $("ptabSys").style.display = ptab === "sys" ? "" : "none";
   $("ptabUser").style.display = ptab === "user" ? "" : "none";
+  $("ptabRating").style.display = ptab === "rating" ? "" : "none";
   $("ptabBond").style.display = ptab === "bond" ? "" : "none";
-  // 羁绊提示词不支持变量替换，该页签下隐藏变量悬浮窗
-  $("placeholderPanel").style.display = ptab === "bond" ? "none" : "";
+  // 评价/羁绊提示词均为纯文本注入，不支持变量替换，这两个页签下隐藏变量悬浮窗
+  $("placeholderPanel").style.display = (ptab === "bond" || ptab === "rating") ? "none" : "";
   if (ptab === "bond") refreshBondTab();
+  if (ptab === "rating") refreshRatingTab();
   // 子页签切换后编辑区重新可见，重算高亮防错位
   requestAnimationFrame(reHighlightAllPromptEditors);
+}
+
+// 五档评价等级（与 mod 的 RatingFromSkin 输出一致）
+const RATING_LEVELS = ["极差评价", "差评", "普通评价", "好评", "极好评"];
+
+function refreshRatingTab() {
+  const d = personasState.data;
+  if (!d) return;
+  d.ratingGlobal = d.ratingGlobal || {};
+  for (let i = 0; i < 5; i++) $("r_global_" + (i + 1)).value = d.ratingGlobal[RATING_LEVELS[i]] || "";
+  // 角色下拉（稀客，按显示名排序，保留原选择）
+  const sel = $("r_char");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const entries = Object.entries(d.characters || {})
+    .filter(([, e]) => e.category === "SpecialGuest")
+    .sort((a, b) => (a[1].displayName || a[0]).localeCompare(b[1].displayName || b[0], "zh"));
+  for (const [key, e] of entries) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = (e.displayName || key) + (e.label ? `（${e.label}）` : "");
+    sel.appendChild(opt);
+  }
+  if (prev && entries.some(([k]) => k === prev)) sel.value = prev;
+  fillRatingCharForm();
+}
+
+function fillRatingCharForm() {
+  const d = personasState.data;
+  const key = $("r_char").value;
+  const e = d && d.characters && d.characters[key];
+  const rp = (e && e.ratingPrompts) || {};
+  for (let i = 0; i < 5; i++) $("r_char_" + (i + 1)).value = rp[RATING_LEVELS[i]] || "";
+}
+
+$("r_char").addEventListener("change", fillRatingCharForm);
+
+for (let i = 0; i < 5; i++) {
+  $("r_global_" + (i + 1)).addEventListener("change", () => {
+    const d = personasState.data; if (!d) return;
+    d.ratingGlobal = d.ratingGlobal || {};
+    const v = $("r_global_" + (i + 1)).value.trim();
+    if (v) d.ratingGlobal[RATING_LEVELS[i]] = v; else delete d.ratingGlobal[RATING_LEVELS[i]];
+    markDirty(personasState);
+  });
+  $("r_char_" + (i + 1)).addEventListener("change", () => {
+    const d = personasState.data; if (!d) return;
+    const key = $("r_char").value;
+    const e = d.characters && d.characters[key]; if (!e) return;
+    e.ratingPrompts = e.ratingPrompts || {};
+    const v = $("r_char_" + (i + 1)).value.trim();
+    if (v) e.ratingPrompts[RATING_LEVELS[i]] = v; else delete e.ratingPrompts[RATING_LEVELS[i]];
+    markDirty(personasState);
+  });
 }
 
 async function refreshBondTab() {
@@ -1707,10 +1789,10 @@ function switchTab(pageId) {
   $("settingsPage").style.display = pageId === "settingsPage" ? "" : "none";
   $("personaPage").style.display = pageId === "personaPage" ? "flex" : "none";
   $("promptsPage").style.display = pageId === "promptsPage" ? "" : "none";
-  // 变量悬浮窗只在提示词结构页签显示（且羁绊子页签下隐藏）
+  // 变量悬浮窗只在提示词结构页签显示（且评价/羁绊子页签下隐藏）
   const activePtab = (document.querySelector(".subtab.active") || {}).dataset?.ptab;
   $("placeholderPanel").style.display =
-    (pageId === "promptsPage" && activePtab !== "bond") ? "" : "none";
+    (pageId === "promptsPage" && activePtab !== "bond" && activePtab !== "rating") ? "" : "none";
   // 页签从隐藏变为可见后重算高亮（隐藏时布局为 0，滚动条补偿会测错）
   if (pageId === "promptsPage") requestAnimationFrame(reHighlightAllPromptEditors);
 }

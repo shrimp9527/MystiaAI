@@ -606,11 +606,11 @@ internal static class NightBubblePatch
         {
             var current = SafePtr(box.box?.sprite);
             if (current == IntPtr.Zero) return string.Empty;
-            if (current == SafePtr(box.exBadSkin?.box)) return "极差";
+            if (current == SafePtr(box.exBadSkin?.box)) return "极差评价";
             if (current == SafePtr(box.badSkin?.box)) return "差评";
-            if (current == SafePtr(box.normalSkin?.box)) return "普通";
+            if (current == SafePtr(box.normalSkin?.box)) return "普通评价";
             if (current == SafePtr(box.goodSkin?.box)) return "好评";
-            if (current == SafePtr(box.exGoodSkin?.box)) return "完美好评";
+            if (current == SafePtr(box.exGoodSkin?.box)) return "极好评";
             PluginContext.Log.LogWarning("[MystiaAI] NightBubble: 评价气泡皮肤未匹配到任何已知等级（rating 用兜底）");
         }
         catch (Exception ex)
