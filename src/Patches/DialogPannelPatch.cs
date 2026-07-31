@@ -902,6 +902,9 @@ internal static class DialogPannelPatch
                 // 玩家输入提到报纸/新闻关键词时强制注入（AI 得知道内容才接得上话）；
                 // 否则不传此键，按 NewsFrequency 概率注入
                 ["newsForce"] = PlayerMentionedNews(active) ? "1" : "0",
+                // 长期记忆：该角色最近几段对话的原文尾部（空串=无记忆，prompt 侧判空）
+                ["memories"] = MemoryStore.GetRecentText(
+                    active.Replacement.CharacterKey, PluginContext.Settings.MemoryInjectCount),
             },
         };
     }

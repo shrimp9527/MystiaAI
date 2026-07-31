@@ -513,19 +513,20 @@ public sealed class PersonaStore
         return file;
     }
 
-    /// <summary>嵌入资源缺失时的兜底（仅分类兜底文案，保证 mod 永远可用）。</summary>
-    private const string MinimalBuiltinJson = """
-        {
-          "_meta": { "tool": "MystiaAI", "kind": "personas", "version": "2" },
-          "categories": {
-            "Default": "幻想乡的普通居民，米斯蒂娅的夜雀食堂常客。性格随和友善，说话随意家常。",
-            "DayNpc": "幻想乡乡道上的普通居民，白天在外闲逛。性格随和，说话家常，会聊聊天气和日常琐事。",
-            "NormalGuest": "光顾米斯蒂娅的夜雀食堂的普通客人，结束一天的生活后来小酌放松。随和健谈，会对菜品和环境随口评价几句。",
-            "SpecialGuest": "幻想乡的知名角色，米斯蒂娅的夜雀食堂稀客。言行符合其原作性格。"
-          },
-          "characters": {}
-        }
-        """;
+    /// <summary>嵌入资源缺失时的兜底（仅分类兜底文案，保证 mod 永远可用）。
+    /// 用字符串拼接而非 C# 11 raw string literal：raw string 需要 .NET 7+ 编译器（C# 11），
+    /// README 承诺的 .NET 6 SDK（C# 10）构建会报 CS1056；拼接版任何 C# 版本都能编译。</summary>
+    private const string MinimalBuiltinJson =
+        "{" +
+        "  \"_meta\": { \"tool\": \"MystiaAI\", \"kind\": \"personas\", \"version\": \"2\" }," +
+        "  \"categories\": {" +
+        "    \"Default\": \"幻想乡的普通居民，米斯蒂娅的夜雀食堂常客。性格随和友善，说话随意家常。\"," +
+        "    \"DayNpc\": \"幻想乡乡道上的普通居民，白天在外闲逛。性格随和，说话家常，会聊聊天气和日常琐事。\"," +
+        "    \"NormalGuest\": \"光顾米斯蒂娅的夜雀食堂的普通客人，结束一天的生活后来小酌放松。随和健谈，会对菜品和环境随口评价几句。\"," +
+        "    \"SpecialGuest\": \"幻想乡的知名角色，米斯蒂娅的夜雀食堂稀客。言行符合其原作性格。\"" +
+        "  }," +
+        "  \"characters\": {}" +
+        "}";
 
     private sealed class PersonaFile
     {

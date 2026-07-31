@@ -49,6 +49,7 @@ public static class PluginContext
         _settings = Settings.LoadOrCreate(config, log);
         Personas = new PersonaStore(log);
         _prompts = new PromptTemplateStore(log);
+        MemoryStore.Initialize(log);
 
         // ApiKey 为空说明用户还没配置真实供应商，退回假 AI 保证替换通道可联调
         UseFakeAi = string.IsNullOrWhiteSpace(Settings.ApiKey);

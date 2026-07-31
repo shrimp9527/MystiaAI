@@ -36,27 +36,27 @@ public sealed class PromptTemplateStore
         "开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。" +
         "你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {characterName}。";
 
-    // ---- 内置默认：五条生成路径的 user 模板（与旧版硬编码输出逐字一致）----
+    // ---- 内置默认：五条生成路径的 user 模板（与旧版硬编码输出一致 + {memories} 长期记忆挂点）----
 
     public const string DefaultUserDayChat =
-        "{situationLine}\n{news}{transcript}\n" +
+        "{situationLine}\n{news}{memories}{transcript}\n" +
         "以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，" +
         "以你的口吻回一句话。（参考：原本的剧本里这句你说的是" +
         "「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）" +
         "只输出这一句台词本身。";
 
     public const string DefaultUserDaySingle =
-        "{situationLine}和她随口闲聊一句。\n{news}{playerReply}";
+        "{situationLine}和她随口闲聊一句。\n{news}{memories}{playerReply}";
 
     public const string DefaultUserNightChat =
-        "{situationLine}随口和老板娘闲聊一句。\n{news}{playerReply}";
+        "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
 
     public const string DefaultUserEvaluation =
         "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。" +
-        "说出一句符合该评价的感想。\n{news}";
+        "说出一句符合该评价的感想。\n{news}{memories}";
 
     public const string DefaultUserReplyOptions =
-        "{mystiaSituationLine}\n{news}{transcript}\n" +
+        "{mystiaSituationLine}\n{news}{memories}{transcript}\n" +
         "以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：" +
         "「{npcLine}」。请给出 {optionCount} 个简短的回应选项。" +
         "要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；" +
