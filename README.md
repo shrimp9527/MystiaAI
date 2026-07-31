@@ -32,7 +32,7 @@
 - 语言自动跟随游戏设置（简中/繁中/英/日/韩）
 ## 运行环境
 
-- 游戏：Steam 版《东方夜雀食堂》（4.4.0e）
+- 游戏：《东方夜雀食堂》（4.4.0e）
 - 系统：Windows x64
 - 加载器：BepInEx 6 IL2CPP 版（BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785 或更新的 bleeding edge 构建，[官方下载页](https://builds.bepinex.dev/projects/bepinex_be)）
 - AI 服务：任一 OpenAI 兼容的 chat completions 接口，需自备 API Key
@@ -78,22 +78,26 @@
 - 第二原作：东方夜雀食堂 / Touhou Mystia’s Izakaya
 - [MetaMystia](https://github.com/MetaMikuAI/MetaMystia)：同为《东方夜雀食堂》的模组项目，其源码为本项目理解游戏内部 API 提供了重要佐证
 - 角色人设资料整理自 THBWiki 与游戏内文本
-- 本项目（游戏 AI 角色设定集）在制作过程中使用了以下网站
--及其提供的数据资料，在此一并表示感谢：
+- [MataMiku](https://github.com/MetaMikuAI)：提供技术支持
+- [河城荷取](https://github.com/xiake595)：制作过程中的测试以及部分代码贡献
+- 本项目（游戏 AI 角色设定集）在制作过程中使用了以下网站，及其提供的数据资料，在此一并表示感谢：
 
--[THBWiki（东方 Project 中文维基）](https://thbwiki.cc/)
+[THBWiki（东方 Project 中文维基）](https://thbwiki.cc/)
 
    提供了 67 位东方 Project 官方角色的完整词条，
    包括角色信息、生活状况、外貌特征、人际关系、
    官作出场记录及一设资料原文，是本项目
    「角色设定」「角色简介」文件夹的全部一设内容来源。
 
-  -[夜雀助手（东方夜雀食堂小助手）](https://izakaya.cc/)
+[夜雀助手（东方夜雀食堂小助手）](https://izakaya.cc/)
   
    二创游戏《东方夜雀食堂》的辅助百科，
    提供了游戏中稀客与普客的人物介绍、出没地区、
    预算、喜好标签、符卡效果、点餐与评价对话等
    全部游戏内设定文本。
+
+
+
 
 ## 说明
 
