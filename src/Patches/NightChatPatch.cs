@@ -186,8 +186,8 @@ internal static class NightChatPatch
             var rating = RatingText(evaluation);
             if (rating.Length == 0) return; // Null 等非常规等级不生成
 
-            var dish = ResolveDishName(__instance);
-            RegisterPending(guest.stringId, guest.Id, ChatScene.Evaluation, __result, null, dish, rating);
+            var food = ResolveServFood(__instance);
+            RegisterPending(guest.stringId, guest.Id, ChatScene.Evaluation, __result, null, null, rating, food);
         }
         catch (Exception ex)
         {
@@ -229,9 +229,10 @@ internal static class NightChatPatch
 
     // ---- 登记 + 生成 + watcher ----
 
-    /// <summary>主线程预取上下文并发起 AI 生成；dish/rating 仅评价场景非空。speaker 可为 null（匹配退化为仅按原文）。</summary>
+    /// <summary>主线程预取上下文并发起 AI 生成；dish/rating 仅评价场景非空（food 非空时附带料理简介/配方食材变量）。speaker 可为 null（匹配退化为仅按原文）。</summary>
     private static void RegisterPending(string characterKey, int characterId, ChatScene scene,
-        string original, Transform? speaker, string? dish, string? rating)
+        string original, Transform? speaker, string? dish, string? rating,
+        GameData.Core.Collections.Sellable? food = null)
     {
         // 首次对话时一次性预建全量稀客别名表（已建则直接返回，失败下次重试，不影响流程）
         SpecialGuestNames.EnsurePrebuilt(PluginContext.Personas);
@@ -244,7 +245,22 @@ internal static class NightChatPatch
             // 长期记忆：该角色最近几段对话的原文尾部（空串=无记忆，prompt 侧判空）
             ["memories"] = MemoryStore.GetRecentText(characterKey, PluginContext.Settings.MemoryInjectCount),
         };
-        if (!string.IsNullOrWhiteSpace(dish)) extra["dish"] = dish;
+        if (food != null)
+        {
+            // 评价场景：菜品名 + 料理简介 + 配方食材（名 / 名+简介）
+            var dishName = food.Text?.Name;
+            if (!string.IsNullOrWhiteSpace(dishName)) extra["dish"] = dishName.Trim();
+            var dishDesc = DishInfo.GetDescription(food);
+            if (dishDesc.Length > 0) extra["dishDesc"] = dishDesc;
+            var ingredients = DishInfo.GetIngredients(food, withDesc: false);
+            if (ingredients.Length > 0) extra["dishIngredients"] = ingredients;
+            var ingredientsDesc = DishInfo.GetIngredients(food, withDesc: true);
+            if (ingredientsDesc.Length > 0) extra["dishIngredientsDesc"] = ingredientsDesc;
+        }
+        else if (!string.IsNullOrWhiteSpace(dish))
+        {
+            extra["dish"] = dish;
+        }
         if (!string.IsNullOrWhiteSpace(rating)) extra["rating"] = rating;
 
         var context = new GenerationContext
@@ -345,30 +361,30 @@ internal static class NightChatPatch
     {
         switch (result)
         {
-            case GuestGroupController.EvaluationResult.Exbad: return "极差";
+            case GuestGroupController.EvaluationResult.Exbad: return "极差评价";
             case GuestGroupController.EvaluationResult.Bad: return "差评";
-            case GuestGroupController.EvaluationResult.Normal: return "普通";
+            case GuestGroupController.EvaluationResult.Normal: return "普通评价";
             case GuestGroupController.EvaluationResult.Good: return "好评";
-            case GuestGroupController.EvaluationResult.ExGood: return "完美好评";
+            case GuestGroupController.EvaluationResult.ExGood: return "极好评";
             default: return string.Empty;
         }
     }
 
-    /// <summary>刚吃完的菜品名：客人订单栈顶（最新一单）的实际出餐 Sellable → 本地化名称。</summary>
-    private static string ResolveDishName(GuestGroupController controller)
+    /// <summary>刚吃完的菜品：客人订单栈顶（最新一单）的实际出餐 Sellable；取不到返回 null。</summary>
+    private static GameData.Core.Collections.Sellable? ResolveServFood(GuestGroupController controller)
     {
         try
         {
-            var order = controller.PeekOrders();
-            var name = order?.ServFood?.Text?.Name;
-            if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
-            PluginContext.Log.LogWarning("[MystiaAI] NightChat: 评价场景取菜品名失败（订单栈顶无出餐），dish 用兜底");
+            var food = controller.PeekOrders()?.ServFood;
+            if (food == null)
+                PluginContext.Log.LogWarning("[MystiaAI] NightChat: 评价场景取出餐失败（订单栈顶无出餐），料理变量用兜底");
+            return food;
         }
         catch (Exception ex)
         {
-            PluginContext.Log.LogWarning($"[MystiaAI] NightChat: 读取菜品名异常（dish 用兜底）: {ex.Message}");
+            PluginContext.Log.LogWarning($"[MystiaAI] NightChat: 评价场景取出餐异常（料理变量用兜底）: {ex.Message}");
+            return null;
         }
-        return string.Empty;
     }
 
     private static int GetKizunaLevel(string characterKey)

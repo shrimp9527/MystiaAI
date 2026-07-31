@@ -149,9 +149,19 @@
   }
   .prompt-editor:focus { outline: none; }
   .editor-wrap:focus-within .editor-backdrop { border-color: var(--accent); }
-  #placeholderTable { border-collapse: collapse; font-size: 13px; width: 100%; }
-  #placeholderTable td { border: 1px solid var(--border); padding: 6px 12px; }
-  #placeholderTable .phDesc { display: block; margin-top: 2px; color: var(--dim); line-height: 1.5; }
+  #varSearchBox {
+    width: 100%; box-sizing: border-box; margin-bottom: 10px;
+    background: #fff; border: 1px solid var(--border); border-radius: 5px;
+    padding: 7px 10px; font-size: 13px; position: sticky; top: 0; z-index: 2;
+  }
+  #varSearchBox:focus { outline: none; border-color: var(--accent); }
+  .var-cat { font-size: 12px; color: var(--dim); font-weight: 600; margin: 12px 0 4px; }
+  .var-row {
+    border: 1px solid var(--border); border-radius: 5px; padding: 6px 12px;
+    font-size: 13px; margin-bottom: 5px; background: #fff;
+  }
+  .var-row .phDesc { display: block; margin-top: 2px; color: var(--dim); line-height: 1.5; }
+  .var-empty { font-size: 12.5px; color: var(--dim); padding: 8px 2px; }
   #placeholderPanel {
     position: fixed; right: 16px; top: 72px; width: 370px; z-index: 900;
     max-height: calc(100vh - 110px); overflow-y: auto;
@@ -225,6 +235,8 @@
     <div class="field"><label>模型</label><input type="text" id="s_model"></div>
     <div class="field"><label>最大字数（默认 50）</label><input type="number" id="s_maxLength" min="5" max="500"></div>
     <div class="field"><label>超时时间（秒）</label><input type="number" id="s_timeout" min="1" max="120" step="0.5"></div>
+    <div class="field"><label>单次 token 限制</label><input type="range" id="s_maxTokens" min="512" max="8000" step="64" value="2000" style="width:300px"></div>
+    <div class="hint">单次请求最多生成的 token 数（当前 <span id="s_maxTokensVal">2000</span>）；带思考链的模型会先消耗推理 token，卡太死会截断正文</div>
     <div class="field"><label>温度</label><input type="range" id="s_temperature" min="0" max="2" step="0.05" value="0.8" style="width:300px"></div>
     <div class="hint">越低越稳定守规矩，越高越发散（当前 <span id="s_tempVal">0.8</span>）；AI 答非所问时可适当调低</div>
     <div class="field"><label>流式显示</label><input type="checkbox" id="s_streaming"></div>
@@ -347,28 +359,8 @@
 <div id="placeholderPanel" class="card" style="display:none">
   <h2>可用变量</h2>
   <div class="hint">括号内中文仅为辅助理解，实际调用名是英文花括号形式；<b>点击变量即可复制</b>。写错名字会原样保留并在游戏日志提示一次。后续版本会补充更多可配置项。</div>
-  <table id="placeholderTable">
-    <tr><td><code class="ph">{characterName}</code><span class="phDesc">角色名（当前说话的角色显示名）</span></td></tr>
-    <tr><td><code class="ph">{persona}</code><span class="phDesc">该角色人设（仅 System 模板有效）</span></td></tr>
-    <tr><td><code class="ph">{gameTime}</code><span class="phDesc">游戏内时间（如「白天 10:30」「夜晚营业中」）</span></td></tr>
-    <tr><td><code class="ph">{location}</code><span class="phDesc">当前地图名（如「妖怪兽道」，白天有效）</span></td></tr>
-    <tr><td><code class="ph">{scene}</code><span class="phDesc">当前场景描述（不含时间）</span></td></tr>
-    <tr><td><code class="ph">{situationLine}</code><span class="phDesc">情境行（时间+场景的组合，NPC 视角）</span></td></tr>
-    <tr><td><code class="ph">{mystiaSituationLine}</code><span class="phDesc">情境行（米斯蒂娅视角，仅回复选项用）</span></td></tr>
-    <tr><td><code class="ph">{transcript}</code><span class="phDesc">完整对话记录（含前几轮续聊内容）</span></td></tr>
-    <tr><td><code class="ph">{targetOriginal}</code><span class="phDesc">当前句的游戏原剧本（仅连贯改写）</span></td></tr>
-    <tr><td><code class="ph">{playerReply}</code><span class="phDesc">玩家上一句回应（带承接引导，无则为空）</span></td></tr>
-    <tr><td><code class="ph">{npcLine}</code><span class="phDesc">最近一句 NPC 台词（仅回复选项用）</span></td></tr>
-    <tr><td><code class="ph">{dish}</code><span class="phDesc">菜品名（仅上菜评价）</span></td></tr>
-    <tr><td><code class="ph">{rating}</code><span class="phDesc">评价等级（仅上菜评价）</span></td></tr>
-    <tr><td><code class="ph">{bondTone}</code><span class="phDesc">羁绊等级语气提示词（「提示词结构 → 羁绊提示词」中按 1~5 级配置，需在通用设置开启后生效）</span></td></tr>
-    <tr><td><code class="ph">{ratingTone}</code><span class="phDesc">评价等级语气提示词（「提示词结构 → 评价提示词」中按五档配置，无开关默认生效）</span></td></tr>
-    <tr><td><code class="ph">{news}</code><span class="phDesc">当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）</span></td></tr>
-    <tr><td><code class="ph">{memories}</code><span class="phDesc">该角色与玩家的过往对话记忆（长期记忆，最近 N 条；模板未放置时自动追加到末尾）</span></td></tr>
-    <tr><td><code class="ph">{language}</code><span class="phDesc">游戏语言（跟随游戏设置）</span></td></tr>
-    <tr><td><code class="ph">{maxLength}</code><span class="phDesc">字数上限（通用设置里的最大字数）</span></td></tr>
-    <tr><td><code class="ph">{optionCount}</code><span class="phDesc">建议回复条数（仅回复选项用）</span></td></tr>
-  </table>
+  <input type="text" id="varSearchBox" placeholder="搜索变量名或注释…">
+  <div id="placeholderList"></div>
 </div>
 <footer>
   配置文件夹：文档（Documents）\MystiaAI\ ｜ 保存后游戏内 2 秒内自动热重载 ｜
@@ -1037,6 +1029,7 @@ function defaultSettings() {
     "provider": "DeepSeek", "apiKey": "",
     "baseUrl": DEFAULT_BASE_URL, "model": DEFAULT_MODEL,
     "maxLength": 50, "streaming": false, "timeoutSeconds": 10,
+    "maxTokens": 2000,
     "temperature": 0.8,
     "newsFrequency": 30, "newsKeywordTrigger": true,
     "bondPromptEnabled": false,
@@ -1049,7 +1042,7 @@ const DEFAULT_PROMPT_REPLY = "你正在扮演米斯蒂娅·萝蕾拉——《东
 const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{memories}{transcript}\n以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，以你的口吻回一句话。（参考：原本的剧本里这句你说的是「{targetOriginal}」，仅作语气参考，不必沿用其内容，可以完全不同。）只输出这一句台词本身。";
 const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{memories}{playerReply}";
 const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
-const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。{ratingTone}说出一句符合该评价的感想。{memories}";
+const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」{dishDesc}{dishIngredients}，评价等级为「{rating}」。{ratingTone}说出一句符合该评价的感想。{memories}";
 const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{memories}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
 function defaultPrompts() {
@@ -1132,7 +1125,8 @@ function loadPersonasText(text, errOut) {
 async function openFolder() {
   try {
     if (window.showDirectoryPicker) {
-      const dir = await window.showDirectoryPicker({ id: "mystiaai-cfg" });
+      // startIn=documents：选择器直接打开到「文档」文件夹，MystiaAI 配置文件夹就在里面
+      const dir = await window.showDirectoryPicker({ id: "mystiaai-cfg", startIn: "documents" });
       dirHandle = dir; dirName = dir.name;
       await readFromDirectory(async name => {
         const h = await dir.getFileHandle(name);
@@ -1323,6 +1317,8 @@ function fillSettingsForm() {
   $("s_model").value = d.model || "";
   $("s_maxLength").value = d.maxLength ?? 50;
   $("s_timeout").value = d.timeoutSeconds ?? 10;
+  $("s_maxTokens").value = d.maxTokens ?? 2000;
+  $("s_maxTokensVal").textContent = d.maxTokens ?? 2000;
   $("s_temperature").value = d.temperature ?? 0.8;
   $("s_tempVal").textContent = d.temperature ?? 0.8;
   $("s_streaming").checked = d.streaming === true;
@@ -1346,6 +1342,7 @@ function collectSettingsForm() {
     model: $("s_model").value.trim(),
     maxLength: parseInt($("s_maxLength").value, 10) || 50,
     timeoutSeconds: parseFloat($("s_timeout").value) || 10,
+    maxTokens: Math.min(8000, Math.max(512, parseInt($("s_maxTokens").value, 10) || 2000)),
     temperature: (v => isNaN(v) ? 0.8 : Math.min(2, Math.max(0, v)))(parseFloat($("s_temperature").value)),
     streaming: $("s_streaming").checked,
     newsFrequency: Math.min(100, Math.max(0, parseInt($("s_newsFrequency").value, 10) || 0)),
@@ -1372,9 +1369,10 @@ $("s_provider").addEventListener("change", () => {
   }
   markDirty(settingsState);
 });
-for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_temperature","s_streaming","s_newsFrequency","s_newsKeyword","s_bondEnabled"])
+for (const id of ["s_enabled","s_normalGuest","s_apiKey","s_baseUrl","s_model","s_maxLength","s_timeout","s_maxTokens","s_temperature","s_streaming","s_newsFrequency","s_newsKeyword","s_bondEnabled"])
   $(id).addEventListener("change", () => markDirty(settingsState));
 $("s_newsFrequency").addEventListener("input", () => { $("s_newsFreqVal").textContent = $("s_newsFrequency").value; });
+$("s_maxTokens").addEventListener("input", () => { $("s_maxTokensVal").textContent = $("s_maxTokens").value; });
 $("s_temperature").addEventListener("input", () => { $("s_tempVal").textContent = $("s_temperature").value; });
 
 /* ================= 角色设定页 ================= */
@@ -1558,12 +1556,75 @@ for (const id of ["p_system", "p_systemReplyOptions", "p_userDayChat", "p_userDa
   "p_userNightChat", "p_userEvaluation", "p_userReplyOptions"])
   $(id).addEventListener("input", () => { collectPromptsForm(); markDirty(promptsState); });
 
-/* ================= 变量语法高亮（已知蓝 / 未知红） ================= */
-const KNOWN_PLACEHOLDERS = new Set([
-  "characterName", "persona", "gameTime", "location", "scene", "situationLine",
-  "mystiaSituationLine", "transcript", "targetOriginal", "playerReply", "npcLine",
-  "dish", "rating", "ratingTone", "bondTone", "news", "memories", "language", "maxLength", "optionCount",
-]);
+/* ================= 变量定义（分类 + 搜索 + 高亮共用一份数据） ================= */
+const VAR_DEFS = [
+  { name: "characterName", desc: "角色名（当前说话的角色显示名）", cat: "角色与语气" },
+  { name: "persona", desc: "该角色人设（仅 System 模板有效）", cat: "角色与语气" },
+  { name: "bondTone", desc: "羁绊等级语气提示词（「提示词结构 → 羁绊提示词」中按 1~5 级配置，需在通用设置开启后生效）", cat: "角色与语气" },
+  { name: "gameTime", desc: "游戏内时间（如「白天 10:30」「夜晚营业中」）", cat: "情境与时空" },
+  { name: "location", desc: "当前地图名（如「妖怪兽道」，白天有效）", cat: "情境与时空" },
+  { name: "scene", desc: "当前场景描述（不含时间）", cat: "情境与时空" },
+  { name: "situationLine", desc: "情境行（时间+场景的组合，NPC 视角）", cat: "情境与时空" },
+  { name: "mystiaSituationLine", desc: "情境行（米斯蒂娅视角，仅回复选项用）", cat: "情境与时空" },
+  { name: "transcript", desc: "完整对话记录（含前几轮续聊内容）", cat: "对话记录" },
+  { name: "targetOriginal", desc: "当前句的游戏原剧本（仅连贯改写）", cat: "对话记录" },
+  { name: "playerReply", desc: "玩家上一句回应（带承接引导，无则为空）", cat: "对话记录" },
+  { name: "npcLine", desc: "最近一句 NPC 台词（仅回复选项用）", cat: "对话记录" },
+  { name: "dish", desc: "菜品名（仅上菜评价）", cat: "料理与评价" },
+  { name: "dishDesc", desc: "料理本身的简介（仅上菜评价）", cat: "料理与评价" },
+  { name: "dishIngredients", desc: "配方基础食材名，「、」连接（仅上菜评价；不含追加食材）", cat: "料理与评价" },
+  { name: "dishIngredientsDesc", desc: "配方基础食材名+简介（仅上菜评价；较长，token 消耗更高）", cat: "料理与评价" },
+  { name: "rating", desc: "评价等级（仅上菜评价）", cat: "料理与评价" },
+  { name: "ratingTone", desc: "评价等级语气提示词（「提示词结构 → 评价提示词」中按五档配置，无开关默认生效）", cat: "料理与评价" },
+  { name: "news", desc: "当日报纸内容（按频率/关键词注入，未注入时为空并自动折叠空行）", cat: "报纸与记忆" },
+  { name: "memories", desc: "该角色与玩家的过往对话记忆（长期记忆，最近 N 条；模板未放置时自动追加到末尾）", cat: "报纸与记忆" },
+  { name: "language", desc: "游戏语言（跟随游戏设置）", cat: "生成参数" },
+  { name: "maxLength", desc: "字数上限（通用设置里的最大字数）", cat: "生成参数" },
+  { name: "optionCount", desc: "建议回复条数（仅回复选项用）", cat: "生成参数" },
+];
+const VAR_CATS = ["角色与语气", "情境与时空", "对话记录", "料理与评价", "报纸与记忆", "生成参数"];
+
+const KNOWN_PLACEHOLDERS = new Set(VAR_DEFS.map(v => v.name));
+
+/* ================= 变量面板：分类渲染 + 搜索过滤 ================= */
+function renderPlaceholderList() {
+  const kw = ($("varSearchBox").value || "").trim().toLowerCase();
+  const list = $("placeholderList");
+  list.innerHTML = "";
+  let shown = 0;
+  for (const cat of VAR_CATS) {
+    const items = VAR_DEFS.filter(v => v.cat === cat &&
+      (!kw || v.name.toLowerCase().includes(kw) || v.desc.toLowerCase().includes(kw)));
+    if (!items.length) continue;
+    const header = document.createElement("div");
+    header.className = "var-cat";
+    header.textContent = cat;
+    list.appendChild(header);
+    for (const v of items) {
+      const row = document.createElement("div");
+      row.className = "var-row";
+      const code = document.createElement("code");
+      code.className = "ph";
+      code.textContent = "{" + v.name + "}";
+      const desc = document.createElement("span");
+      desc.className = "phDesc";
+      desc.textContent = v.desc;
+      row.appendChild(code);
+      row.appendChild(desc);
+      list.appendChild(row);
+      shown++;
+    }
+  }
+  if (shown === 0) {
+    const empty = document.createElement("div");
+    empty.className = "var-empty";
+    empty.textContent = "无匹配变量";
+    list.appendChild(empty);
+  }
+}
+
+$("varSearchBox").addEventListener("input", renderPlaceholderList);
+renderPlaceholderList();
 
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1759,27 +1820,28 @@ function showCopyToast(text) {
   clearTimeout(showCopyToast._timer);
   showCopyToast._timer = setTimeout(() => { t.style.opacity = "0"; }, 1200);
 }
-document.querySelectorAll("#placeholderPanel .ph").forEach(el => {
-  el.addEventListener("click", async () => {
-    const text = el.textContent;
-    // 即时本地反馈：元素闪烁（证明点击已注册，不受剪贴板权限影响）
-    el.style.transition = "none";
-    el.style.background = "rgba(181, 84, 46, .5)";
-    setTimeout(() => { el.style.transition = "background .5s"; el.style.background = ""; }, 150);
-    let ok = false;
+// 事件委托：列表是动态渲染的，直接绑在容器上
+$("placeholderList").addEventListener("click", async ev => {
+  const el = ev.target.closest(".ph");
+  if (!el) return;
+  const text = el.textContent;
+  // 即时本地反馈：元素闪烁（证明点击已注册，不受剪贴板权限影响）
+  el.style.transition = "none";
+  el.style.background = "rgba(181, 84, 46, .5)";
+  setTimeout(() => { el.style.transition = "background .5s"; el.style.background = ""; }, 150);
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch {
     try {
-      await navigator.clipboard.writeText(text);
-      ok = true;
-    } catch {
-      try {
-        // 剪贴板 API 不可用（file:// 等）时的降级
-        const ta = document.createElement("textarea");
-        ta.value = text; document.body.appendChild(ta);
-        ta.select(); ok = document.execCommand("copy"); ta.remove();
-      } catch { ok = false; }
-    }
-    showCopyToast(ok ? "已复制 " + text : "复制失败（浏览器剪贴板权限被拒），请手动复制");
-  });
+      // 剪贴板 API 不可用（file:// 等）时的降级
+      const ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta);
+      ta.select(); ok = document.execCommand("copy"); ta.remove();
+    } catch { ok = false; }
+  }
+  showCopyToast(ok ? "已复制 " + text : "复制失败（浏览器剪贴板权限被拒），请手动复制");
 });
 
 /* ================= 页签 ================= */

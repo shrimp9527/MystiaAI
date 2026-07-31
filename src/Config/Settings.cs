@@ -57,6 +57,9 @@ public sealed class Settings
     /// <summary>生成温度（0-2）：越低越稳定越守规矩，越高越发散；默认 0.8。</summary>
     public float Temperature { get; set; } = 0.8f;
 
+    /// <summary>单次请求的 max_tokens 上限（下限 512 生效）：带思考链的模型会先消耗推理 token，卡太死会截断正文。默认 2000。</summary>
+    public int MaxTokens { get; set; } = 2000;
+
     /// <summary>启用羁绊提示词（{bondTone} 变量注入），默认关闭；关闭时该变量恒为空。</summary>
     public bool BondPromptEnabled { get; set; } = false;
 
@@ -160,6 +163,7 @@ public sealed class Settings
         NewsFrequency = NewsFrequency,
         NewsKeywordTrigger = NewsKeywordTrigger,
         Temperature = Temperature,
+        MaxTokens = MaxTokens,
         BondPromptEnabled = BondPromptEnabled,
         MemoryEnabled = MemoryEnabled,
         MemoryMaxPerCharacter = MemoryMaxPerCharacter,
@@ -182,6 +186,7 @@ public sealed class Settings
         if (dto.NewsFrequency.HasValue) NewsFrequency = Math.Clamp(dto.NewsFrequency.Value, 0, 100);
         if (dto.NewsKeywordTrigger.HasValue) NewsKeywordTrigger = dto.NewsKeywordTrigger.Value;
         if (dto.Temperature.HasValue) Temperature = Math.Clamp(dto.Temperature.Value, 0f, 2f);
+        if (dto.MaxTokens.HasValue) MaxTokens = Math.Clamp(dto.MaxTokens.Value, 512, 16000);
         if (dto.BondPromptEnabled.HasValue) BondPromptEnabled = dto.BondPromptEnabled.Value;
         if (dto.MemoryEnabled.HasValue) MemoryEnabled = dto.MemoryEnabled.Value;
         if (dto.MemoryMaxPerCharacter.HasValue) MemoryMaxPerCharacter = Math.Clamp(dto.MemoryMaxPerCharacter.Value, 1, 200);
@@ -203,6 +208,7 @@ public sealed class Settings
         NewsFrequency = cfg.Bind("AI", "NewsFrequency", 30).Value;
         NewsKeywordTrigger = cfg.Bind("AI", "NewsKeywordTrigger", true).Value;
         Temperature = cfg.Bind("AI", "Temperature", 0.8f).Value;
+        MaxTokens = cfg.Bind("AI", "MaxTokens", 2000).Value;
         BondPromptEnabled = cfg.Bind("AI", "BondPromptEnabled", false).Value;
         MemoryEnabled = cfg.Bind("AI", "MemoryEnabled", true).Value;
         MemoryMaxPerCharacter = cfg.Bind("AI", "MemoryMaxPerCharacter", 10).Value;
@@ -225,6 +231,7 @@ public sealed class Settings
         [JsonPropertyName("newsFrequency")] public int? NewsFrequency { get; set; }
         [JsonPropertyName("newsKeywordTrigger")] public bool? NewsKeywordTrigger { get; set; }
         [JsonPropertyName("temperature")] public float? Temperature { get; set; }
+        [JsonPropertyName("maxTokens")] public int? MaxTokens { get; set; }
         [JsonPropertyName("bondPromptEnabled")] public bool? BondPromptEnabled { get; set; }
         [JsonPropertyName("memoryEnabled")] public bool? MemoryEnabled { get; set; }
         [JsonPropertyName("memoryMaxPerCharacter")] public int? MemoryMaxPerCharacter { get; set; }
