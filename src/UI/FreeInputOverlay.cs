@@ -16,9 +16,10 @@ namespace MystiaAI.UI;
 
 /// <summary>
 /// 自由输入覆盖层：轮到米斯蒂娅（Self）的台词时弹出。
-/// 视觉原则：不做独立面板——主面板精确覆盖游戏对话框（同位置/同尺寸/同底色，底图 sprite 能复刻就复刻），
-/// 看起来就是对话框本身：上半区透明背景输入区（米白大字居中 + 灰色占位提示），
-/// 右上角并排的「结束对话」「重新生成推荐回复」与「完成」小按钮，底部两个并排的 AI 建议按钮（深色底米白字）；
+/// 视觉原则：不使用自定义大框——覆盖层除输入框/按钮外全透明，游戏原版对话框完整透出。
+/// 布局：对话正文区域左右分栏——左 4/5 区内部上下平分（上半=输入框，下半=两个 AI 建议按钮并排）；
+/// 右 1/5 区竖排「完成 / 重新生成 / 结束对话」三个功能按钮（自上而下，互不重叠）。
+/// 右上角并排的「结束对话」「重新生成」与「完成」小按钮，底部两个并排的 AI 建议按钮（深色底米白字）；
 /// 提交只走鼠标点击（完成/建议按钮）——键盘 Enter/Esc 检测在本环境多条通道均不可靠，已移除。
 /// 层级策略：不做独立的 ScreenSpaceOverlay（实测被游戏对话框压住），
 /// 而是挂到 DialogPannel 所在的根 Canvas 之下，siblingIndex 插在游戏指针节点前，保证渲染在对话框之上且射线不被挡。
@@ -45,7 +46,7 @@ internal sealed class FreeInputOverlay
     private bool _cursorVisibleWas;
 
     /// <summary>
-    /// 「重新生成推荐回复」按钮引用（点击检测用）。
+    /// 「重新生成」按钮引用（点击检测用）。
     /// 崩溃转储证实：两个 dmp 都死在 coreclr.dll+0x1d1fdd（native UnityEvent → managed 委托 thunk），
     /// 且钉住委托后崩溃原样复现——Il2CppInterop 的 UnityEvent 回调通道在本环境不可用。
     /// 因此按钮不再订阅 onClick，改为 Poll 里轮询鼠标位置 + RectTransform 命中检测（纯只读原生调用）。
@@ -58,7 +59,7 @@ internal sealed class FreeInputOverlay
     /// <summary>「结束对话」按钮引用（点击检测用，命中后关闭覆盖层并干净终止整段对话）。</summary>
     private Button? _exitButton;
 
-    /// <summary>打开时传入的建议 provider（「重新生成推荐回复」复用再跑一遍）。</summary>
+    /// <summary>打开时传入的建议 provider（「重新生成」复用再跑一遍）。</summary>
     private Func<CancellationToken, Task<IReadOnlyList<string>>>? _suggestionProvider;
 
     /// <summary>建议生成进行中（重新生成按钮防重复点击）。</summary>
@@ -67,8 +68,23 @@ internal sealed class FreeInputOverlay
     /// <summary>对话正文同款米白色（输入文字/按钮文字/占位提示的基色）。</summary>
     private static readonly Color OffWhite = new(0.96f, 0.94f, 0.88f);
 
-    /// <summary>建议/重新生成按钮底色：比对话框底色稍深的深色。</summary>
-    private static readonly Color ButtonBg = new(0.10f, 0.09f, 0.12f, 0.92f);
+    /// <summary>建议/重新生成按钮底色：深棕，比面板底色略深。</summary>
+    private static readonly Color ButtonBg = new(0.24f, 0.14f, 0.08f, 0.95f);
+
+    /// <summary>主面板底色：深棕半透明——面板有明确底板（不再全透明），同时仍透出游戏对话框底图轮廓。</summary>
+    private static readonly Color PanelBg = new(0.28f, 0.17f, 0.09f, 0.86f);
+
+    /// <summary>面板/输入框/按钮描边色：浅棕，与深棕面板形成外浅内深的层次。</summary>
+    private static readonly Color PanelBorder = new(0.78f, 0.62f, 0.42f, 0.85f);
+
+    /// <summary>输入框底色：比面板亮一档的深棕，标识可输入区域。</summary>
+    private static readonly Color InputBg = new(0.36f, 0.23f, 0.13f, 0.90f);
+
+    /// <summary>整个覆盖层（面板+输入框+全部按钮）相对正文矩形中心的垂直下移量（UI y 向上为正，正值=下移）。</summary>
+    private const float VerticalOffset = 60f;
+
+    /// <summary>右侧三个功能按钮（完成/重新生成/结束对话）额外的垂直下移量（仅右区，左区不动）。</summary>
+    private const float RightButtonsVerticalOffset = 15f;
 
     /// <summary>Close 已排队到 Update 通道（防 Poll 在 drain 前重复入队）。</summary>
     private bool _closeQueued;
@@ -222,11 +238,11 @@ internal sealed class FreeInputOverlay
                         textPos = p;
                         textSize = s;
                         matched = true;
-                        // 面板 = 正文矩形外扩 4 单位的包络（纯透明点击拦截层）
-                        var top = textPos.y + textSize.y / 2f + 4f;
-                        var bottom = textPos.y - textSize.y / 2f - 4f;
+                        // 面板 = 正文矩形外扩 10 单位的包络（点击拦截层，同时形成明显的面板边框）
+                        var top = textPos.y + textSize.y / 2f + 10f;
+                        var bottom = textPos.y - textSize.y / 2f - 10f;
                         panelPos = new Vector2(textPos.x, (top + bottom) / 2f);
-                        panelSize = new Vector2(textSize.x + 8f, top - bottom);
+                        panelSize = new Vector2(textSize.x + 20f, top - bottom);
                     }
                     else
                     {
@@ -242,70 +258,99 @@ internal sealed class FreeInputOverlay
             if (!matched)
                 PluginContext.Log.LogWarning("[MystiaAI] FreeInputOverlay: 未定位到对话正文矩形，回退固定布局");
 
+            // 整体下移：面板与全部子元素（输入框/建议/功能按钮）一起向下平移
+            panelPos.y -= VerticalOffset;
+
             var panelGo = NewUi("Panel", _root.transform, panelPos, panelSize);
             var bg = panelGo.AddComponent<Image>();
-            // 透明（alpha=0）但保留 raycastTarget：游戏对话框底图透出来，点击仍被我们拦截不穿透
-            bg.color = matched ? new Color(0f, 0f, 0f, 0f) : new Color(0f, 0f, 0f, 0.85f);
+            // 不要自定义大框：纯透明点击拦截层，游戏原版对话框完全透出；
+            // 保留 raycastTarget：点击仍被我们拦截不穿透
+            bg.color = new Color(0f, 0f, 0f, 0f);
             panelTf = panelGo.transform;
         });
         if (panelTf == null) return; // 背景都失败就不再往下建，避免半残 UI
 
-        // ---- 布局度量（相对面板：输入区=正文矩形即上方打字区，其下并排两个建议按钮，
-        //      正文右上角三个并排小按钮：结束对话 + 重新生成 + 完成）----
-        const float gap = 10f;
-        var regenSize = new Vector2(160f, 30f);
-        var doneSize = new Vector2(64f, 30f);
-        var exitSize = new Vector2(96f, 30f);
+        // ---- 布局度量（相对面板：对话正文矩形左右分栏——左 4/5 区内部上下平分
+        //      （上半=输入框，下半=两个 AI 建议按钮）；右 1/5 区竖排功能按钮
+        //      （完成 / 重新生成 / 结束对话，自上而下，互不重叠））----
+        const float gap = 14f;
+        var regenSize = new Vector2(160f, 34f);
+        var doneSize = new Vector2(72f, 34f);
+        var exitSize = new Vector2(104f, 34f);
         Vector2 inputPos, inputSize, regenPos, donePos, exitPos;
-        float suggY, suggW, suggH;
+        float suggY, suggW, suggH, sugg1X, sugg2X;
         if (matched)
         {
-            // 正文区域内部分配：上部=输入区（宽度比正文略窄），底部条=两个并排建议按钮。
-            // （实测正文区下方到对话框底边只有几像素，按钮放正文区之外必然超出对话框，只能放区内底部。）
-            suggH = 34f;
-            suggW = (textSize.x - 40f - gap) / 2f;
+            // 左右分栏：左 4/5 = 输入框+建议按钮区，右 1/5 = 功能按钮区
             var textTop = textPos.y + textSize.y / 2f;
             var textBottom = textPos.y - textSize.y / 2f;
-            var suggCenterY = textBottom + 3f + suggH / 2f;              // 相对覆盖层根
-            var inputTop = textTop - 2f;
-            var inputBottom = suggCenterY + suggH / 2f + 3f;
-            inputSize = new Vector2(textSize.x - 40f, Mathf.Max(36f, inputTop - inputBottom));
-            inputPos = new Vector2(textPos.x, (inputTop + inputBottom) / 2f);
-            donePos = new Vector2(
-                textPos.x + inputSize.x / 2f - 4f - doneSize.x / 2f,
-                inputTop - 2f - doneSize.y / 2f);
-            regenPos = new Vector2(
-                donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
-                donePos.y);
-            exitPos = new Vector2(
-                regenPos.x - regenSize.x / 2f - 8f - exitSize.x / 2f,
-                donePos.y);
+            var textLeft = textPos.x - textSize.x / 2f;
+            var textRight = textPos.x + textSize.x / 2f;
+            var leftW = textSize.x * 4f / 5f;
+            var rightW = textSize.x / 5f;
+            var leftCenterX = textLeft + leftW / 2f;
+            var rightCenterX = textRight - rightW / 2f;
+
+            // 左 4/5 区内上下平分（中间留 10f）：上半=输入框，下半=两个建议按钮
+            const float midGap = 10f;
+            var halfH = (textSize.y - midGap) / 2f;
+            inputSize = new Vector2(leftW - 2f * 20f, Mathf.Max(36f, halfH - 10f));
+            inputPos = new Vector2(leftCenterX, textTop - halfH / 2f);
+            suggH = 40f;
+            suggW = (leftW - 2f * 16f - gap) / 2f;
+            sugg1X = leftCenterX - suggW / 2f - gap / 2f;
+            sugg2X = leftCenterX + suggW / 2f + gap / 2f;
+            suggY = textBottom + halfH / 2f;
+
+            // 右 1/5 区：三个功能按钮竖排（完成 / 重新生成 / 结束对话），整组垂直居中
+            var btnW = rightW - 2f * 12f;
+            var btnH = 34f;
+            var btnGap = 10f;
+            doneSize = new Vector2(btnW, btnH);
+            regenSize = new Vector2(btnW, btnH);
+            exitSize = new Vector2(btnW, btnH);
+            var btnTotalH = 3f * btnH + 2f * btnGap;
+            var topBtnY = textPos.y + btnTotalH / 2f - btnH / 2f - RightButtonsVerticalOffset;
+            donePos = new Vector2(rightCenterX, topBtnY);
+            regenPos = new Vector2(rightCenterX, topBtnY - btnH - btnGap);
+            exitPos = new Vector2(rightCenterX, topBtnY - 2f * (btnH + btnGap));
+
             // 换算为相对面板中心
-            suggY = suggCenterY - panelPos.y;
             inputPos -= panelPos;
+            sugg1X -= panelPos.x;
+            sugg2X -= panelPos.x;
+            suggY -= panelPos.y;
             regenPos -= panelPos;
             donePos -= panelPos;
             exitPos -= panelPos;
         }
         else
         {
-            var pad = 14f;
+            // 回退：面板区域同样左右分栏（左 4/5 内部上下平分，右 1/5 竖排功能按钮）
+            var leftW = panelSize.x * 4f / 5f;
+            var rightW = panelSize.x / 5f;
+            var leftCenterX = -panelSize.x / 2f + leftW / 2f;
+            var rightCenterX = panelSize.x / 2f - rightW / 2f;
+            const float midGap = 10f;
+            var halfH = (panelSize.y - midGap) / 2f;
             suggH = 44f;
-            suggW = (panelSize.x - 2f * pad - gap) / 2f;
-            suggY = -panelSize.y / 2f + pad + suggH / 2f;
-            var inputTop = panelSize.y / 2f - pad - regenSize.y - gap;
-            var inputBottom = -panelSize.y / 2f + pad + suggH + gap;
-            inputSize = new Vector2(panelSize.x - 2f * pad, Mathf.Max(40f, inputTop - inputBottom));
-            inputPos = new Vector2(0f, (inputTop + inputBottom) / 2f);
-            donePos = new Vector2(
-                panelSize.x / 2f - pad - doneSize.x / 2f,
-                panelSize.y / 2f - pad - doneSize.y / 2f);
-            regenPos = new Vector2(
-                donePos.x - doneSize.x / 2f - 8f - regenSize.x / 2f,
-                donePos.y);
-            exitPos = new Vector2(
-                regenPos.x - regenSize.x / 2f - 8f - exitSize.x / 2f,
-                donePos.y);
+            inputSize = new Vector2(leftW - 2f * 20f, Mathf.Max(40f, halfH - 10f));
+            inputPos = new Vector2(leftCenterX, panelSize.y / 2f - halfH / 2f);
+            suggW = (leftW - 2f * 18f - gap) / 2f;
+            sugg1X = leftCenterX - suggW / 2f - gap / 2f;
+            sugg2X = leftCenterX + suggW / 2f + gap / 2f;
+            suggY = -panelSize.y / 2f + halfH / 2f;
+            var btnW = rightW - 2f * 12f;
+            var btnH = 34f;
+            var btnGap = 10f;
+            doneSize = new Vector2(btnW, btnH);
+            regenSize = new Vector2(btnW, btnH);
+            exitSize = new Vector2(btnW, btnH);
+            var btnTotalH = 3f * btnH + 2f * btnGap;
+            var topBtnY = btnTotalH / 2f - btnH / 2f - RightButtonsVerticalOffset;
+            donePos = new Vector2(rightCenterX, topBtnY);
+            regenPos = new Vector2(rightCenterX, topBtnY - btnH - btnGap);
+            exitPos = new Vector2(rightCenterX, topBtnY - 2f * (btnH + btnGap));
         }
 
         // ---- 输入框（背景近似透明融入面板，米白大字居中，灰色占位提示）----
@@ -313,7 +358,8 @@ internal sealed class FreeInputOverlay
         {
             var inputGo = NewUi("Input", panelTf, inputPos, inputSize);
             var inputImg = inputGo.AddComponent<Image>();
-            inputImg.color = new Color(1f, 1f, 1f, 0.05f); // 极浅高光，近似透明
+            inputImg.sprite = CreateRoundedRectSprite(inputSize.x, inputSize.y, InputBg, PanelBorder, 3f, 14f);
+            inputImg.color = Color.white; // sprite 已含颜色
 
             var textGo = NewUi("Text", inputGo.transform, Vector2.zero, inputSize - new Vector2(20f, 8f));
             var textComp = textGo.AddComponent<TextMeshProUGUI>();
@@ -327,7 +373,7 @@ internal sealed class FreeInputOverlay
             var phComp = phGo.AddComponent<TextMeshProUGUI>();
             if (font != null) phComp.font = font;
             phComp.fontSize = 32f;
-            phComp.color = new Color(0.85f, 0.83f, 0.78f, 0.5f);
+            phComp.color = new Color(0.80f, 0.70f, 0.55f, 0.55f); // 浅棕灰占位提示
             phComp.alignment = TextAlignmentOptions.Center;
             phComp.text = "说点什么…";
             phComp.raycastTarget = false;
@@ -340,27 +386,27 @@ internal sealed class FreeInputOverlay
             _input.text = string.Empty;
         });
 
-        // ---- AI 建议按钮（底部左右并排，深色底米白字；初始「生成中…」不可点）----
+        // ---- AI 建议按钮（下半左 4/5 区并排，深色底米白字；初始「生成中…」不可点）----
         Step("创建建议按钮1", () => CreateSuggestionButton(panelTf, 0,
-            new Vector2(-(suggW + gap) / 2f, suggY), new Vector2(suggW, suggH), font));
+            new Vector2(sugg1X, suggY), new Vector2(suggW, suggH), font));
         Step("创建建议按钮2", () => CreateSuggestionButton(panelTf, 1,
-            new Vector2((suggW + gap) / 2f, suggY), new Vector2(suggW, suggH), font));
+            new Vector2(sugg2X, suggY), new Vector2(suggW, suggH), font));
 
-        // ---- 右上角并排小按钮：结束对话 + 重新生成推荐回复 + 完成（提交输入）----
+        // ---- 右下 1/5 区竖排功能按钮（上→下）：完成（提交输入）+ 重新生成 + 结束对话 ----
         Step("创建结束对话按钮", () =>
         {
             _exitButton = CreateStyledButton(panelTf, "结束对话", exitPos, exitSize, font,
-                "结束对话", 18f, out _);
+                "结束对话", 20f, out _);
         });
         Step("创建重新生成按钮", () =>
         {
             _regenButton = CreateStyledButton(panelTf, "重新生成", regenPos, regenSize, font,
-                "重新生成推荐回复", 18f, out _);
+                "重新生成", 20f, out _);
         });
         Step("创建完成按钮", () =>
         {
             _doneButton = CreateStyledButton(panelTf, "完成", donePos, doneSize, font,
-                "完成", 18f, out _);
+                "完成", 20f, out _);
         });
 
         // ---- 聚焦策略：不自动聚焦——用户点击输入框后才进入输入态（Poll 里检测点击命中后 Activate）。
@@ -390,7 +436,8 @@ internal sealed class FreeInputOverlay
     {
         var go = NewUi(name + "Button", parent, pos, size);
         var img = go.AddComponent<Image>();
-        img.color = ButtonBg;
+        img.sprite = CreateRoundedRectSprite(size.x, size.y, ButtonBg, PanelBorder, 2f, 10f); // 圆角矩形按钮
+        img.color = Color.white; // sprite 已含颜色
         var btn = go.AddComponent<Button>();
         btn.targetGraphic = img;
         // 不订阅 onClick（UnityEvent → managed thunk 会崩）；不可点时 Button 默认 ColorTint 自动半透明灰化
@@ -403,9 +450,11 @@ internal sealed class FreeInputOverlay
         text.color = OffWhite;
         text.alignment = TextAlignmentOptions.Center;
         text.raycastTarget = false;
+        // 防超框：关闭自动换行，超出按钮宽度时由 TMP 按像素裁掉并显示省略号（Ellipsis）
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
         labelComp = text;
-        return btn;
-    }
+        return btn;    }
 
     private void StartSuggestions(Func<CancellationToken, Task<IReadOnlyList<string>>>? provider)
     {
@@ -518,11 +567,11 @@ internal sealed class FreeInputOverlay
         }
     }
 
-    /// <summary>「重新生成推荐回复」点击：复用打开时的 provider 再跑一遍（生成中/无 provider 时忽略）。</summary>
+    /// <summary>「重新生成」点击：复用打开时的 provider 再跑一遍（生成中/无 provider 时忽略）。</summary>
     private void RegenSuggestions()
     {
         if (_closed || _suggestionsLoading || _suggestionProvider == null) return;
-        PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 重新生成推荐回复");
+        PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 重新生成");
         SetSuggestionsLoading();
         StartSuggestions(_suggestionProvider);
     }
@@ -661,9 +710,10 @@ internal sealed class FreeInputOverlay
         }
     }
 
-    /// <summary>按钮显示用截断（完整文本照常提交）。按钮约 300 单位宽、字号 22，全角字约 13 个即满。</summary>
+    /// <summary>按钮显示用截断（完整文本照常提交）。先按字符粗截（宽裕值 18），
+    /// 剩余超出由 TMP Ellipsis 按像素精确裁掉（见 CreateStyledButton）。</summary>
     private static string TruncateForButton(string s)
-        => s.Length <= 12 ? s : s.Substring(0, 12) + "…";
+        => s.Length <= 18 ? s : s.Substring(0, 18) + "…";
 
     private void Poll()
     {
@@ -963,6 +1013,66 @@ internal sealed class FreeInputOverlay
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// 程序化生成「圆角矩形填充 + 外侧描边」的 Sprite（矩形四角带圆角，圆角外为透明，
+    /// Image 本身仍是矩形，点击拦截区域不变）。用有向距离场（SDF）绘制：
+    /// 内部填充色、边界外一圈描边色、再往外透明，边缘均带抗锯齿过渡。
+    /// 纹理分辨率封顶 256（长边），每次调用重新生成，不缓存。
+    /// </summary>
+    private static Sprite CreateRoundedRectSprite(float width, float height, Color fill, Color border,
+        float borderWidth, float cornerRadius)
+    {
+        const int maxTex = 256;
+        var scale = Mathf.Min(1f, maxTex / Mathf.Max(width, height));
+        var tw = Mathf.Max(4, Mathf.RoundToInt(width * scale));
+        var th = Mathf.Max(4, Mathf.RoundToInt(height * scale));
+        var tex = new Texture2D(tw, th, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        var halfW = tw / 2f;
+        var halfH = th / 2f;
+        var radius = Mathf.Max(1f, cornerRadius * scale);       // 圆角半径（纹理像素）
+        var borderPx = Mathf.Max(1f, borderWidth * scale);      // 描边带宽度（纹理像素）
+        const float aa = 1f;                                    // 抗锯齿过渡宽度（纹理像素）
+
+        for (var y = 0; y < th; y++)
+        {
+            for (var x = 0; x < tw; x++)
+            {
+                var px = x + 0.5f - halfW;
+                var py = y + 0.5f - halfH;
+                // 圆角矩形 SDF：d<=0 在矩形内，d>0 在矩形外（像素单位）
+                var qx = Mathf.Abs(px) - (halfW - radius);
+                var qy = Mathf.Abs(py) - (halfH - radius);
+                var d = Mathf.Sqrt(Mathf.Max(qx, 0f) * Mathf.Max(qx, 0f) + Mathf.Max(qy, 0f) * Mathf.Max(qy, 0f))
+                    + Mathf.Min(Mathf.Max(qx, qy), 0f) - radius;
+
+                Color c;
+                float a;
+                if (d < 0f)
+                {
+                    // 内部：填充色，边缘向描边色过渡（抗锯齿）
+                    var t = Mathf.Clamp01((d + aa) / aa);
+                    c = Color.Lerp(fill, border, t);
+                    a = 1f;
+                }
+                else if (d <= borderPx - aa)
+                {
+                    c = border; a = 1f;                                 // 描边带
+                }
+                else
+                {
+                    // 描边外缘：向透明过渡（抗锯齿）
+                    var t = Mathf.Clamp01((borderPx + aa - d) / (2f * aa));
+                    c = border; a = t;
+                }
+                tex.SetPixel(x, y, new Color(c.r, c.g, c.b, c.a * a));
+            }
+        }
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0f, 0f, tw, th), new Vector2(0.5f, 0.5f), 100f);
     }
 
     private static GameObject NewUi(string name, Transform parent, Vector2 anchoredPos, Vector2 size)

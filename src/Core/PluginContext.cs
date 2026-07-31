@@ -26,18 +26,6 @@ public static class PluginContext
 
     public static IAiClient AiClient { get; private set; } = null!;
     public static PersonaStore Personas { get; private set; } = null!;
-
-    /// <summary>提示词模板（每次访问按文件修改时间热重载，节流 2 秒）。</summary>
-    public static PromptTemplateStore Prompts
-    {
-        get
-        {
-            _prompts.ReloadIfChanged();
-            return _prompts;
-        }
-    }
-
-    private static PromptTemplateStore _prompts = null!;
     public static ManualLogSource Log { get; private set; } = null!;
 
     /// <summary>当前是否处于「假 AI」开发模式（ApiKey 为空时自动成立，也可手动置回 true 强制假 AI）。</summary>
@@ -48,7 +36,6 @@ public static class PluginContext
         Log = log;
         _settings = Settings.LoadOrCreate(config, log);
         Personas = new PersonaStore(log);
-        _prompts = new PromptTemplateStore(log);
 
         // ApiKey 为空说明用户还没配置真实供应商，退回假 AI 保证替换通道可联调
         UseFakeAi = string.IsNullOrWhiteSpace(Settings.ApiKey);

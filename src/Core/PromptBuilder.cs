@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
-using MystiaAI.Config;
 
 namespace MystiaAI.Core;
 
@@ -24,24 +23,35 @@ public sealed class ChatMessage
 /// <summary>
 /// 把 GenerationContext + 人设拼成 chat completions 的 messages（system + user）。
 /// 客户端只负责发送，不在这里之外拼 prompt。
-/// system 走 prompts.json 模板（变量：characterName/persona/language/maxLength/bondTone），
-/// 模板缺失时用内置默认（与本类旧硬编码文案一致）。
 /// </summary>
 public static class PromptBuilder
 {
     /// <summary>
-    /// NPC 台词生成：system 为角色扮演指令，user 为场景上下文（均走 prompts.json 模板）。
+    /// 全局扮演规则（来自用户的「调用说明」）：随 system prompt 一并发给模型，
+    /// 约束台词风格与输出格式；角色档案与原版台词范本在 persona 资料里提供。
+    /// </summary>
+    private const string RoleplayRules =
+        "扮演规则：" +
+        "1.贴合原作风格，不OOC，不使用网络流行语；" +
+        "2.台词贴合角色性格，使用短句和口语；" +
+        "3.人设资料中包含该角色的档案与原版点餐/评价对话范本，" +
+        "参考优先级：角色档案＞原版对话范本，尽量复刻范本的句式与口吻；" +
+        "4.仅输出角色台词本身，不含旁白、引号与额外说明。";
+
+    /// <summary>
+    /// NPC 台词生成：system 为角色扮演指令，user 为场景上下文。
     /// Extra 同时带 transcript（完整对话原文）与 targetOriginal（要改写的那句）时，
-    /// 走「多段对话连贯改写」路径（userDayChat）；否则按场景走单句模板
-    /// （userDaySingle/userNightChat/userEvaluation）。
+    /// 走「多段对话连贯改写」路径；否则保持单句场景模式（营业闲聊/评价等）。
     /// </summary>
     public static IReadOnlyList<ChatMessage> BuildMessages(GenerationContext context, string persona)
     {
         var language = MapLanguage(context.Language);
         var max = EffectiveMaxLength(context);
-        var vars = BuildVars(context, persona, language, max);
 
-        var system = PluginContext.Prompts.RenderSystem(vars);
+        var system =
+            $"你正在扮演《东方夜雀食堂》中的角色 {context.CharacterName}。{persona}。" +
+            RoleplayRules +
+            $"以该角色的口吻说一句话。要求：使用{language}；不超过{max}字。";
 
         // 多段对话改写：Patch 层传入整段原文，只改写属于当前角色的那一句
         if (context.Extra.TryGetValue("transcript", out var transcript) && !string.IsNullOrWhiteSpace(transcript)
@@ -52,23 +62,27 @@ public static class PromptBuilder
                 "避免与上面对话中已经出现过的句式和开头重复；" +
                 "口癖、口头禅除非特别贴切，否则不要用。";
 
+            var user =
+                // 时间/场景锚点放最前，避免模型按人设脑补营业场景
+                $"{BuildSituationLine(context)}\n" +
+                BuildNewsSection(context) +
+                $"{transcript}\n" +
+                "以上是你与对方的对话，最后一句是对方刚刚对你说的话。请直接承接这句话，" +
+                "以你的口吻回一句话。（参考：原本的剧本里这句你说的是" +
+                $"「{target}」，仅作语气参考，不必沿用其内容，可以完全不同。）" +
+                "只输出这一句台词本身。";
+
             return new List<ChatMessage>
             {
                 new ChatMessage("system", system),
-                new ChatMessage("user", RenderUser(PromptTemplateStore.UserKind.DayChat, vars)),
+                new ChatMessage("user", user),
             };
         }
 
-        var kind = context.Scene switch
-        {
-            ChatScene.NightChat => PromptTemplateStore.UserKind.NightChat,
-            ChatScene.Evaluation => PromptTemplateStore.UserKind.Evaluation,
-            _ => PromptTemplateStore.UserKind.DaySingle,
-        };
         return new List<ChatMessage>
         {
             new ChatMessage("system", system),
-            new ChatMessage("user", RenderUser(kind, vars)),
+            new ChatMessage("user", BuildSceneUser(context)),
         };
     }
 
@@ -80,12 +94,31 @@ public static class PromptBuilder
     {
         var language = MapLanguage(context.Language);
         var max = EffectiveMaxLength(context);
-        var vars = BuildVars(context, string.Empty, language, max);
-        vars["npcLine"] = npcLine ?? string.Empty;
-        vars["optionCount"] = optionCount.ToString();
 
-        var system = PluginContext.Prompts.RenderReplyOptionsSystem(vars);
-        var user = RenderUser(PromptTemplateStore.UserKind.ReplyOptions, vars);
+        var system =
+            "你正在扮演米斯蒂娅·萝蕾拉——《东方夜雀食堂》的主角，" +
+            "开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。" +
+            $"你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {context.CharacterName}。";
+
+        // 米斯蒂娅视角的情境行（非营业时间会额外禁止揽客口吻）
+        string user = $"{BuildMystiaSituationLine(context)}\n" + BuildNewsSection(context);
+
+        if (context.Extra.TryGetValue("transcript", out var transcript) && !string.IsNullOrWhiteSpace(transcript))
+        {
+            // 带完整对话上下文：玩家要回应对方最后一句话
+            user +=
+                $"{transcript}\n" +
+                "以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：" +
+                $"「{npcLine}」。请给出 {optionCount} 个简短的回应选项。";
+        }
+        else
+        {
+            user += $"{context.CharacterName} 对你说：「{npcLine}」\n";
+        }
+
+        user +=
+            "要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；" +
+            $"每条不超过{max}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
         return new List<ChatMessage>
         {
@@ -122,9 +155,8 @@ public static class PromptBuilder
     /// 当日《文文新闻》剪报段（Extra["news"]，空串=未解锁/无数据）。
     /// Extra["newsForce"]="1"（玩家输入命中报纸关键词的回合）时强制注入——
     /// 玩家在谈报纸，AI 必须知道报纸内容才能接话；其余情况按 Settings.NewsFrequency
-    /// （百分比）的概率注入，避免 AI 高频提及报纸；掷骰未中或为空时返回空串。
-    /// 注入时以「今日《文文新闻》内容为：」开头，让模型明确这是当日报纸原文，
-    /// 防止模型刻意聊到「今天没有报纸」这类话题。
+    /// （百分比）的概率注入，避免 AI 高频提及报纸；掷骰未中或为空时返回空串，
+    /// 行为与不传该键完全一致。引导语刻意用「可以」「不要每句都提」的分寸，避免模型句句带报纸。
     /// </summary>
     private static string BuildNewsSection(GenerationContext context)
     {
@@ -142,7 +174,7 @@ public static class PromptBuilder
             }
         }
         return
-            $"今日《文文新闻》内容为：{news}\n" +
+            $"今日《文文新闻》剪报：{news}\n" +
             (force
                 ? "如果玩家的话题涉及报纸或新闻，根据剪报内容回答；否则可以自然地把报纸内容当作闲聊话题，但不要每句都提。\n"
                 : "可以自然地把报纸内容当作闲聊话题，但不要每句都提。\n");
@@ -161,7 +193,25 @@ public static class PromptBuilder
     /// GameTime 为空时只写场景描述。对话改写与单句路径统一使用，避免两处说法打架。
     /// </summary>
     private static string BuildSituationLine(GenerationContext context)
-        => WithTime(context, SceneDesc(context));
+    {
+        string sceneDesc;
+        switch (context.Scene)
+        {
+            case ChatScene.DayChat:
+                sceneDesc = $"你们在{LocationText(context)}偶遇闲聊（不是营业时间，不在居酒屋里）";
+                break;
+            case ChatScene.NightChat:
+                sceneDesc = "夜晚营业中，你在米斯蒂娅的夜雀食堂里";
+                break;
+            case ChatScene.Evaluation:
+                sceneDesc = "夜晚营业中，你刚在居酒屋吃完料理";
+                break;
+            default:
+                sceneDesc = "你在与米斯蒂娅闲聊";
+                break;
+        }
+        return WithTime(context, sceneDesc);
+    }
 
     /// <summary>
     /// 情境行（米斯蒂娅视角，"你"=玩家扮演的米斯蒂娅），用于回复选项路径。
@@ -201,76 +251,46 @@ public static class PromptBuilder
             : $"现在是{context.GameTime}，{sceneDesc}。";
     }
 
-    /// <summary>场景描述（不含时间，供 {scene} 变量与情境行共用）。</summary>
-    private static string SceneDesc(GenerationContext context)
+    private static string BuildSceneUser(GenerationContext context)
     {
+        string scene;
         switch (context.Scene)
         {
-            case ChatScene.DayChat: return $"你们在{LocationText(context)}偶遇闲聊（不是营业时间，不在居酒屋里）";
-            case ChatScene.NightChat: return "夜晚营业中，你在米斯蒂娅的夜雀食堂里";
-            case ChatScene.Evaluation: return "夜晚营业中，你刚在居酒屋吃完料理";
-            default: return "你在与米斯蒂娅闲聊";
-        }
-    }
-
-    /// <summary>
-    /// 组装全部模板变量（system/user 模板共用一份）。
-    /// user 专用键（transcript/targetOriginal/dish/rating/news/playerReply 等）也在此取好。
-    /// </summary>
-    private static Dictionary<string, string> BuildVars(GenerationContext context, string persona, string language, int max)
-    {
-        // 羁绊语气提示词：开关关闭时恒为空；key 解析与人设同口径（characterKey 优先，退回显示名）
-        var bondTone = string.Empty;
-        if (PluginContext.Settings.BondPromptEnabled)
-        {
-            var bondKey = context.Extra.TryGetValue("characterKey", out var ck) && !string.IsNullOrWhiteSpace(ck)
-                ? ck
-                : context.CharacterName;
-            bondTone = PluginContext.Personas.GetBondTone(bondKey, context.KizunaLevel);
+            case ChatScene.DayChat:
+                scene = BuildSituationLine(context)
+                    + $"和她随口闲聊一句。你与她的羁绊等级：{context.KizunaLevel}。";
+                break;
+            case ChatScene.NightChat:
+                scene = BuildSituationLine(context)
+                    + $"随口和老板娘闲聊一句。你与她的羁绊等级：{context.KizunaLevel}。";
+                break;
+            case ChatScene.Evaluation:
+                scene = BuildEvaluationScene(context);
+                break;
+            default:
+                scene = BuildSituationLine(context) + "和米斯蒂娅随口闲聊一句。";
+                break;
         }
 
-        return new Dictionary<string, string>
-        {
-            ["characterName"] = context.CharacterName ?? string.Empty,
-            ["persona"] = persona ?? string.Empty,
-            ["language"] = language,
-            ["maxLength"] = max.ToString(),
-            ["bondTone"] = bondTone,
-            ["gameTime"] = context.GameTime ?? string.Empty,
-            ["location"] = LocationText(context),
-            ["scene"] = SceneDesc(context),
-            ["situationLine"] = BuildSituationLine(context),
-            ["mystiaSituationLine"] = BuildMystiaSituationLine(context),
-            ["transcript"] = Extra(context, "transcript"),
-            ["targetOriginal"] = Extra(context, "targetOriginal"),
-            ["dish"] = ExtraOr(context, "dish", "料理"),
-            ["rating"] = ExtraOr(context, "rating", "普通"),
-            ["news"] = BuildNewsSection(context),
-            ["playerReply"] = PlayerReplySection(context),
-            ["npcLine"] = string.Empty, // 回复选项路径覆盖
-            ["optionCount"] = "2",      // 回复选项路径覆盖
-        };
+        // 当日新闻剪报（若有）跟在情境与场景指令之后
+        var newsSection = BuildNewsSection(context);
+        if (newsSection.Length > 0)
+            scene += "\n" + newsSection.TrimEnd('\n');
+
+        // 玩家上一句回应（自由输入或选项面板），要求 NPC 承接
+        if (context.Extra.TryGetValue("playerReply", out var reply) && !string.IsNullOrWhiteSpace(reply))
+            scene += $"\n米斯蒂娅刚刚对你说：「{reply}」。请承接她的话回应。";
+
+        return scene;
     }
 
-    /// <summary>渲染 user 模板并收尾：折叠多余空行（报纸未注入时不留空白），去首尾空白。</summary>
-    private static string RenderUser(PromptTemplateStore.UserKind kind, Dictionary<string, string> vars)
+    private static string BuildEvaluationScene(GenerationContext context)
     {
-        var text = PluginContext.Prompts.RenderUser(kind, vars);
-        while (text.Contains("\n\n")) text = text.Replace("\n\n", "\n");
-        return text.Trim();
+        // 评价场景：Extra 里带菜品（dish）与评价等级（rating）
+        var dish = context.Extra.TryGetValue("dish", out var d) && !string.IsNullOrWhiteSpace(d) ? d : "料理";
+        var rating = context.Extra.TryGetValue("rating", out var r) && !string.IsNullOrWhiteSpace(r) ? r : "普通";
+        return BuildSituationLine(context)
+            + $"你吃的是「{dish}」，评价等级为「{rating}」。"
+            + $"说出一句符合该评价的感想。你与老板娘的羁绊等级：{context.KizunaLevel}。";
     }
-
-    /// <summary>玩家上一句回应段（自由输入或选项面板）：有则整句带承接引导，无则空串。</summary>
-    private static string PlayerReplySection(GenerationContext context)
-    {
-        return context.Extra.TryGetValue("playerReply", out var reply) && !string.IsNullOrWhiteSpace(reply)
-            ? $"米斯蒂娅刚刚对你说：「{reply}」。请承接她的话回应。"
-            : string.Empty;
-    }
-
-    private static string Extra(GenerationContext context, string key)
-        => context.Extra.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : string.Empty;
-
-    private static string ExtraOr(GenerationContext context, string key, string fallback)
-        => context.Extra.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : fallback;
 }

@@ -57,9 +57,6 @@ public sealed class Settings
     /// <summary>生成温度（0-2）：越低越稳定越守规矩，越高越发散；默认 0.8。</summary>
     public float Temperature { get; set; } = 0.8f;
 
-    /// <summary>启用羁绊提示词（{bondTone} 变量注入），默认关闭；关闭时该变量恒为空。</summary>
-    public bool BondPromptEnabled { get; set; } = false;
-
     private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
         WriteIndented = true,
@@ -151,7 +148,6 @@ public sealed class Settings
         NewsFrequency = NewsFrequency,
         NewsKeywordTrigger = NewsKeywordTrigger,
         Temperature = Temperature,
-        BondPromptEnabled = BondPromptEnabled,
     };
 
     private void ReadFrom(string json)
@@ -170,7 +166,6 @@ public sealed class Settings
         if (dto.NewsFrequency.HasValue) NewsFrequency = Math.Clamp(dto.NewsFrequency.Value, 0, 100);
         if (dto.NewsKeywordTrigger.HasValue) NewsKeywordTrigger = dto.NewsKeywordTrigger.Value;
         if (dto.Temperature.HasValue) Temperature = Math.Clamp(dto.Temperature.Value, 0f, 2f);
-        if (dto.BondPromptEnabled.HasValue) BondPromptEnabled = dto.BondPromptEnabled.Value;
     }
 
     /// <summary>从旧 BepInEx cfg 读取同名字段（只读不写；文件不存在时 Bind 会给默认值，正好当出厂值）。</summary>
@@ -188,7 +183,6 @@ public sealed class Settings
         NewsFrequency = cfg.Bind("AI", "NewsFrequency", 30).Value;
         NewsKeywordTrigger = cfg.Bind("AI", "NewsKeywordTrigger", true).Value;
         Temperature = cfg.Bind("AI", "Temperature", 0.8f).Value;
-        BondPromptEnabled = cfg.Bind("AI", "BondPromptEnabled", false).Value;
         // WebPort 已废弃（网页改为纯静态页，不再有本地服务），不迁移
     }
 
@@ -207,7 +201,6 @@ public sealed class Settings
         [JsonPropertyName("newsFrequency")] public int? NewsFrequency { get; set; }
         [JsonPropertyName("newsKeywordTrigger")] public bool? NewsKeywordTrigger { get; set; }
         [JsonPropertyName("temperature")] public float? Temperature { get; set; }
-        [JsonPropertyName("bondPromptEnabled")] public bool? BondPromptEnabled { get; set; }
     }
 }
 
