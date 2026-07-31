@@ -245,6 +245,12 @@ public static class PromptBuilder
             bondTone = PluginContext.Personas.GetBondTone(bondKey, context.KizunaLevel);
         }
 
+        // 评价语气提示词（无开关，空档即不注入）：key 解析同上
+        var ratingKey = context.Extra.TryGetValue("characterKey", out var rk) && !string.IsNullOrWhiteSpace(rk)
+            ? rk
+            : context.CharacterName;
+        var ratingTone = PluginContext.Personas.GetRatingTone(ratingKey, Extra(context, "rating"));
+
         // 长期记忆段：开关（MemoryEnabled）关闭或注入条数为 0 时恒为空；
         // 模板写 {memories} 即替换，未写则由 RenderUser 兜底追加
         var memories = BuildMemoriesSection(context);
@@ -256,6 +262,7 @@ public static class PromptBuilder
             ["language"] = language,
             ["maxLength"] = max.ToString(),
             ["bondTone"] = bondTone,
+            ["ratingTone"] = ratingTone,
             ["gameTime"] = context.GameTime ?? string.Empty,
             ["location"] = LocationText(context),
             ["scene"] = SceneDesc(context),
@@ -264,7 +271,7 @@ public static class PromptBuilder
             ["transcript"] = Extra(context, "transcript"),
             ["targetOriginal"] = Extra(context, "targetOriginal"),
             ["dish"] = ExtraOr(context, "dish", "料理"),
-            ["rating"] = ExtraOr(context, "rating", "普通"),
+            ["rating"] = ExtraOr(context, "rating", "普通评价"),
             ["news"] = BuildNewsSection(context),
             ["playerReply"] = PlayerReplySection(context),
             ["memories"] = memories, // 长期记忆段（模板变量 {memories}）

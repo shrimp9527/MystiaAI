@@ -177,6 +177,53 @@ public sealed class PersonaStore
         }
     }
 
+    /// <summary>
+    /// 取五档评价语气提示词（{ratingTone} 变量）：角色专属（精确 key → label 匹配 → 别名换算）
+    /// → 文件全局兜底 → 内置默认全局兜底 → 空串。rating 为空/未知直接返回空串。
+    /// </summary>
+    public string GetRatingTone(string? characterKey, string? rating)
+    {
+        if (string.IsNullOrWhiteSpace(rating)) return string.Empty;
+        ReloadIfChanged();
+        lock (_gate)
+        {
+            var file = EnsureLoaded();
+            file.RatingGlobal ??= new Dictionary<string, string>();
+
+            PersonaEntry? entry = null;
+            if (!string.IsNullOrWhiteSpace(characterKey))
+            {
+                if (file.Characters.TryGetValue(characterKey, out var e1)) entry = e1;
+                else
+                {
+                    foreach (var (_, e) in file.Characters)
+                    {
+                        if (!string.IsNullOrEmpty(e.Label) && e.Label == characterKey) { entry = e; break; }
+                    }
+                    if (entry == null)
+                    {
+                        var cn = ResolveAlias(characterKey);
+                        if (cn != null && file.Characters.TryGetValue(cn, out var e2)) entry = e2;
+                    }
+                }
+            }
+
+            if (entry?.RatingPrompts != null
+                && entry.RatingPrompts.TryGetValue(rating, out var tone)
+                && !string.IsNullOrWhiteSpace(tone))
+            {
+                return tone.Trim();
+            }
+            if (file.RatingGlobal.TryGetValue(rating, out var gt) && !string.IsNullOrWhiteSpace(gt))
+                return gt.Trim();
+            // 旧版文件没有该档 → 内置默认全局兜底
+            var builtin = BuiltinDefaults().RatingGlobal;
+            if (builtin != null && builtin.TryGetValue(rating, out var bt) && !string.IsNullOrWhiteSpace(bt))
+                return bt.Trim();
+            return string.Empty;
+        }
+    }
+
     /* ================= 别名表（stringId → 中文名） ================= */
 
     /// <summary>
@@ -418,6 +465,7 @@ public sealed class PersonaStore
             file.Categories ??= new Dictionary<string, string>();
             file.Characters ??= new Dictionary<string, PersonaEntry>();
             file.BondGlobal ??= new Dictionary<string, string>();
+            file.RatingGlobal ??= new Dictionary<string, string>();
         }
 
         // 旧英文 key → 中文名 key 迁移（预置别名覆盖的角色）
@@ -457,6 +505,21 @@ public sealed class PersonaStore
         {
             file.Dirty = true;
             _log?.LogInfo($"[MystiaAI] 已补齐 {added} 条内置角色人设");
+        }
+
+        // 补缺的五档评价全局兜底（不覆盖用户已有的档位；旧版文件整组缺失时整组写入）
+        var builtinRatings = builtin.RatingGlobal;
+        if (builtinRatings != null && builtinRatings.Count > 0)
+        {
+            file.RatingGlobal ??= new Dictionary<string, string>();
+            foreach (var (rk, rv) in builtinRatings)
+            {
+                if (!file.RatingGlobal.ContainsKey(rk))
+                {
+                    file.RatingGlobal[rk] = rv;
+                    file.Dirty = true;
+                }
+            }
         }
         return file;
     }
@@ -510,6 +573,7 @@ public sealed class PersonaStore
         file.Categories ??= new Dictionary<string, string>();
         file.Characters ??= new Dictionary<string, PersonaEntry>();
         file.BondGlobal ??= new Dictionary<string, string>();
+        file.RatingGlobal ??= new Dictionary<string, string>();
         return file;
     }
 
@@ -537,6 +601,9 @@ public sealed class PersonaStore
         /// <summary>全局兜底羁绊提示词（key 为 "1"~"5"）：角色无专属提示词时回退到此。</summary>
         [JsonPropertyName("bondGlobal")] public Dictionary<string, string> BondGlobal { get; set; } = new();
 
+        /// <summary>五档评价语气提示词全局兜底（角色无专属时回退；文件缺档时由内置默认再兜底）。</summary>
+        [JsonPropertyName("ratingGlobal")] public Dictionary<string, string> RatingGlobal { get; set; } = new();
+
         /// <summary>加载过程中发生过迁移/补齐（不序列化，仅内存标记，提示调用方写回）。</summary>
         [JsonIgnore] public bool Dirty { get; set; }
     }
@@ -555,5 +622,8 @@ public sealed class PersonaStore
 
         /// <summary>羁绊 1~5 级语气提示词（key 为 "1"~"5"）。可选，空/缺失=无专属提示词。</summary>
         [JsonPropertyName("bondPrompts")] public Dictionary<string, string>? BondPrompts { get; set; }
+
+        /// <summary>五档评价语气提示词（极差评价/差评/普通评价/好评/极好评）。可选，空/缺失=用全局兜底。</summary>
+        [JsonPropertyName("ratingPrompts")] public Dictionary<string, string>? RatingPrompts { get; set; }
     }
 }

@@ -53,7 +53,7 @@ public sealed class PromptTemplateStore
 
     public const string DefaultUserEvaluation =
         "{situationLine}你吃的是「{dish}」，评价等级为「{rating}」。" +
-        "说出一句符合该评价的感想。\n{news}{memories}";
+        "{ratingTone}说出一句符合该评价的感想。{memories}";
 
     public const string DefaultUserReplyOptions =
         "{mystiaSituationLine}\n{news}{memories}{transcript}\n" +
