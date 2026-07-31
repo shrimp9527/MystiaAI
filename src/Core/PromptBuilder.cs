@@ -272,6 +272,9 @@ public static class PromptBuilder
             ["targetOriginal"] = Extra(context, "targetOriginal"),
             ["dish"] = ExtraOr(context, "dish", "料理"),
             ["rating"] = ExtraOr(context, "rating", "普通评价"),
+            ["dishDesc"] = Extra(context, "dishDesc"),
+            ["dishIngredients"] = Extra(context, "dishIngredients"),
+            ["dishIngredientsDesc"] = Extra(context, "dishIngredientsDesc"),
             ["news"] = BuildNewsSection(context),
             ["playerReply"] = PlayerReplySection(context),
             ["memories"] = memories, // 长期记忆段（模板变量 {memories}）

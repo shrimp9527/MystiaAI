@@ -63,7 +63,9 @@ public sealed class OpenAiCompatibleClient : IAiClient
         var messages = PromptBuilder.BuildMessages(context, GetPersona(context));
         // max_tokens 要留足余量：deepseek-v4 等带思考链的模型会先消耗推理 token，
         // 卡太死会导致正文还没输出就被截断（表现为"AI 返回内容为空"）
-        var maxTokens = Math.Max(512, EffectiveMaxLength(context) * 4);
+        // max_tokens 用配置的单次上限（下限 512）：deepseek-v4 等带思考链的模型会先消耗推理 token，
+        // 卡太死会导致正文还没输出就被截断（表现为"AI 返回内容为空"）
+        var maxTokens = Math.Max(512, PluginContext.Settings.MaxTokens);
         var body = await PostChatAsync(messages, maxTokens, stream: false, cancellationToken).ConfigureAwait(false);
         var content = ExtractContent(body);
         return Truncate(content.Trim(), context.MaxLength);
@@ -76,7 +78,7 @@ public sealed class OpenAiCompatibleClient : IAiClient
         var messages = PromptBuilder.BuildMessages(context, GetPersona(context));
         // max_tokens 要留足余量：deepseek-v4 等带思考链的模型会先消耗推理 token，
         // 卡太死会导致正文还没输出就被截断（表现为"AI 返回内容为空"）
-        var maxTokens = Math.Max(512, EffectiveMaxLength(context) * 4);
+        var maxTokens = Math.Max(512, PluginContext.Settings.MaxTokens);
         var payload = BuildPayload(messages, maxTokens, stream: true);
         var maxLength = context.MaxLength;
 
@@ -149,7 +151,7 @@ public sealed class OpenAiCompatibleClient : IAiClient
         GenerationContext context, string npcLine, int optionCount, CancellationToken cancellationToken = default)
     {
         var messages = PromptBuilder.BuildReplyOptionsMessages(context, npcLine, optionCount);
-        var maxTokens = Math.Max(128, optionCount * EffectiveMaxLength(context) * 3);
+        var maxTokens = Math.Max(128, PluginContext.Settings.MaxTokens);
         var body = await PostChatAsync(messages, maxTokens, stream: false, cancellationToken).ConfigureAwait(false);
         var content = ExtractContent(body);
 

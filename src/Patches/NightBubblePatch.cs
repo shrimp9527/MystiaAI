@@ -29,20 +29,19 @@ namespace MystiaAI.Patches;
 ///
 /// 工作流（依据 docs/game-api.md 第 G 章可行性调查）：
 /// 平时每 30 帧（评价窗口存活或有未决 Pending 时提频到 5 帧）：
-/// 相位闸门 → 刷新控制器状态（HasEvaluated 翻转检测 + 提前缓存菜品；
-///   翻转当刻立即登记评价预生成，rating 此刻读不到故 prompt 降级不带）
+/// 相位闸门 → 刷新控制器状态（HasEvaluated 翻转检测 + 提前缓存菜品/ServFood）
 /// → FindObjectsOfType&lt;DialogBoxUI&gt;(true) 扫气泡 → 逐个甄别：
 ///   评价气泡（EvalulationBoxUI）：followTarget 反查客人 + HasEvaluated 翻转窗口内
-///     → 优先认领预生成任务（AI 已就绪则当帧直接改写，无原文闪现；未就绪写占位符「……」）；
-///     无预生成则登记 Evaluation 生成 + 占位符，等级由 box.sprite 与 5 套皮肤 Sprite 引用比较反推；
-///     窗口外的一律不动（符卡 bark 同型气泡，诊断日志验证 bark 不翻转 HasEvaluated）；
+///     → 等级由 box.sprite 与 5 套皮肤 Sprite 引用比较反推，带真实 rating 登记 Evaluation
+///       生成 + 占位符「……」（皮肤出现前评级读不到，已取消翻转时预生成——它会按兜底
+///       「普通评价」注入错误档位语气）；
+///     一次翻转只认一条（窗口消费 -2），窗口外的一律不动（符卡 bark 同型气泡）；
 ///   闲聊气泡（普通 DialogBoxUI）：followTarget 反查客人 + 文本命中闲聊池
 ///     （稀客 SpecialConversation / 普客 NormalConversation，普客受 NormalGuestAiEnabled 开关控制）
 ///     → 登记 NightChat 生成 + 占位符（未命中的文本打诊断日志供校准匹配规则）。
 /// AI 文本到位 → 主线程终态化：气泡活着且文本仍是原文或占位符 → tmp.text 原地改写；
 /// 生成失败 → 占位符还原原文（原文是天然回退态）。
-/// 改写成功登记 RewrittenTexts 让下一轮扫描认出自己的 AI 文本（防「未命中池/疑似 bark」误报）；
-/// 预生成等不到气泡（客人走了/窗口过期）由 EvictStaleAwaitingEval 淘汰，不泄漏。
+/// 改写成功登记 RewrittenTexts 让下一轮扫描认出自己的 AI 文本（防「未命中池/疑似 bark」误报）。
 /// </summary>
 internal static class NightBubblePatch
 {
@@ -57,11 +56,11 @@ internal static class NightBubblePatch
     {
         public string CharacterKey = string.Empty; // 稀客 stringId（如 "Rumia"）/ 普客本地化名
         public ChatScene Scene;                    // NightChat / Evaluation
-        public string Original = string.Empty;     // 先行显示的原文（改写前的防串校验基线；预生成待绑定时为空）
+        public string Original = string.Empty;     // 先行显示的原文（改写前的防串校验基线）
         public Task<string> AiTask = Task.FromResult(string.Empty);
         public IntPtr BoxPtr;                      // 气泡 native 指针（去重 + 存活校验）
-        public DialogBoxUI? Box;                   // null = 评价预生成待绑定（气泡还没出现）
-        public IntPtr ControllerPtr;               // 预生成评价的来源控制器指针（绑定/淘汰用）
+        public DialogBoxUI? Box;                   // 气泡对象（登记时必非空）
+        public IntPtr ControllerPtr;               // 来源控制器指针（预留）
         public bool Resolved;
         public bool AiDone;                        // watcher 已尘埃落定（成功/失败/超时）
         public string? ReadyText;                  // AI 结果（null = 失败/超时）
@@ -74,6 +73,7 @@ internal static class NightBubblePatch
         public bool HasEvaluated;                  // 上轮观察值
         public int EvalFlippedFrame = -1;          // HasEvaluated false→true 翻转发生的帧号
         public string Dish = string.Empty;         // 最近观察到的菜品名（提前缓存，评价时订单可能已出栈）
+        public GameData.Core.Collections.Sellable? Food; // 最近观察到的出餐本体（料理简介/配方食材变量用）
     }
 
     private static int _frame;
@@ -190,7 +190,7 @@ internal static class NightBubblePatch
                 Controllers.Clear();
                 SeenBubbles.Clear();
                 RewrittenTexts.Clear();
-                // 未绑定的预生成任务等不到气泡了，一并淘汰（已绑定的由 watcher 终态化，气泡死亡自然不动）
+                // 防御性清理：理论上 Pending 登记时必带气泡（已取消预生成），此循环恒为空
                 foreach (var p in Pending)
                     if (p.Box == null) { p.Resolved = true; _scratchPending.Add(p); }
                 foreach (var p in _scratchPending) Pending.Remove(p);
@@ -205,29 +205,7 @@ internal static class NightBubblePatch
         if (UnityObjectGuard.IsDead(manager)) return;
 
         RefreshControllers(manager!);
-        EvictStaleAwaitingEval();
         SweepBubbles();
-    }
-
-    /// <summary>淘汰等不到气泡的预生成评价任务：来源控制器已离场，或翻转窗口已过期。</summary>
-    private static void EvictStaleAwaitingEval()
-    {
-        _scratchPending.Clear();
-        foreach (var p in Pending)
-        {
-            if (p.Resolved || p.Box != null) continue;
-            if (!Controllers.TryGetValue(p.ControllerPtr, out var st) ||
-                st.EvalFlippedFrame < 0 || _frame - st.EvalFlippedFrame > EvalWindowFrames)
-                _scratchPending.Add(p);
-        }
-        foreach (var p in _scratchPending)
-        {
-            p.Resolved = true;
-            Pending.Remove(p);
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] NightBubble: 预生成评价（{p.CharacterKey}）在窗口内未等到气泡，任务淘汰");
-        }
-        _scratchPending.Clear();
     }
 
     private static readonly List<PendingBubble> _scratchPending = new();
@@ -289,14 +267,20 @@ internal static class NightBubblePatch
                     PluginContext.Log.LogInfo(
                         $"[MystiaAI] NightBubble: 检测到评价完成翻转（{DescribeController(controller)}），" +
                         $"后续 {EvalWindowFrames} 帧内的评价气泡按吃饭评价认领");
-                    // 翻转即预生成：气泡出现时 AI 文本往往已就绪，第一轮扫到直接改写，消除原文闪现
-                    RegisterPreEvaluation(controller, state);
+                    // 不再翻转即预生成：此刻评级还读不到（控制器不存 EvaluationResult，
+                    // 只能从气泡皮肤反推），预生成会按兜底「普通评价」注入错误档位语气；
+                    // 改为气泡出现（皮肤可读）时才带真实 rating 生成（方案 2）
                 }
                 state.HasEvaluated = evaluated;
 
                 // 菜品提前缓存：订单在时就记下来，评价气泡弹出时订单可能已出栈
-                var dish = ReadDishName(controller);
-                if (dish.Length > 0) state.Dish = dish;
+                var food = ReadServFood(controller);
+                if (food != null)
+                {
+                    state.Food = food;
+                    var dishName = food.Text?.Name;
+                    if (!string.IsNullOrWhiteSpace(dishName)) state.Dish = dishName.Trim();
+                }
             }
             catch (Exception ex)
             {
@@ -315,17 +299,16 @@ internal static class NightBubblePatch
 
     private static readonly List<IntPtr> _stalePtrs = new();
 
-    /// <summary>读取订单栈顶出餐菜品名；取不到返回空串（调用方保留旧缓存）。</summary>
-    private static string ReadDishName(GuestGroupController controller)
+    /// <summary>读取订单栈顶出餐 Sellable；取不到返回 null（调用方保留旧缓存）。</summary>
+    private static GameData.Core.Collections.Sellable? ReadServFood(GuestGroupController controller)
     {
         try
         {
-            var name = controller.PeekOrders()?.ServFood?.Text?.Name;
-            return string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();
+            return controller.PeekOrders()?.ServFood;
         }
         catch
         {
-            return string.Empty; // 订单为空栈等常规情况，静默
+            return null; // 订单为空栈等常规情况，静默
         }
     }
 
@@ -463,40 +446,11 @@ internal static class NightBubblePatch
             // 一次翻转只认一条评价：认领成功立即关闭窗口（-2=已消费），
             // 防止同窗口内的符卡 bark（与吃饭评价共用 EvalulationBoxUI）被误判为第二条评价
             state.EvalFlippedFrame = -2;
+            // 皮肤此刻可读 → 带真实 rating / ratingTone 生成（占位符期间生成，不再有预生成）
             var rating = RatingFromSkin(evalBox);
 
-            // 优先认领翻转时登记的预生成任务
-            var pre = FindAwaitingEval(controllerPtr);
-            if (pre != null)
-            {
-                if (pre.AiDone && pre.ReadyText == null)
-                {
-                    // 预生成已失败/超时：淘汰，走下方新登记
-                    pre.Resolved = true;
-                    Pending.Remove(pre);
-                }
-                else
-                {
-                    pre.Box = box;
-                    pre.BoxPtr = boxPtr;
-                    pre.Original = text;
-                    if (pre.AiDone)
-                    {
-                        // AI 文本已就绪：当帧直接改写，用户看不到原文
-                        TryFinalize(pre);
-                    }
-                    else
-                    {
-                        WritePlaceholder(box);
-                        PluginContext.Log.LogInfo(
-                            $"[MystiaAI] NightBubble: 评价气泡认领预生成（{pre.CharacterKey} 评价「{rating}」），AI 未就绪，已写占位符");
-                    }
-                    return;
-                }
-            }
-
             RegisterBubble(box, boxPtr, characterKey, characterId, ChatScene.Evaluation, text,
-                state.Dish, rating, isSpecial);
+                state.Dish, rating, isSpecial, state.Food);
             return;
         }
 
@@ -711,9 +665,10 @@ internal static class NightBubblePatch
 
     // ---- 登记 + 生成 + watcher（模式复刻 NightChatPatch）----
 
-    /// <summary>构建生成上下文并发起 AI 生成 + watcher；成功返回已入队 Pending，失败返回 null（保持原文）。</summary>
+    /// <summary>构建生成上下文并发起 AI 生成 + watcher；成功返回已入队 Pending，失败返回 null（保持原文）。food 非空时附带料理简介/配方食材变量。</summary>
     private static PendingBubble? CreatePending(string characterKey, int characterId,
-        ChatScene scene, string original, string? dish, string? rating, bool isSpecial)
+        ChatScene scene, string original, string? dish, string? rating, bool isSpecial,
+        GameData.Core.Collections.Sellable? food = null)
     {
         try
         {
@@ -729,7 +684,21 @@ internal static class NightBubblePatch
                 // 人设分类：普客走 NormalGuest 分类人设，稀客走角色专属/SpecialGuest 兜底
                 ["personaCategory"] = isSpecial ? PersonaStore.CategorySpecialGuest : PersonaStore.CategoryNormalGuest,
             };
-            if (!string.IsNullOrWhiteSpace(dish)) extra["dish"] = dish;
+            if (food != null)
+            {
+                var dishName = food.Text?.Name;
+                if (!string.IsNullOrWhiteSpace(dishName)) extra["dish"] = dishName.Trim();
+                var dishDesc = DishInfo.GetDescription(food);
+                if (dishDesc.Length > 0) extra["dishDesc"] = dishDesc;
+                var ingredients = DishInfo.GetIngredients(food, withDesc: false);
+                if (ingredients.Length > 0) extra["dishIngredients"] = ingredients;
+                var ingredientsDesc = DishInfo.GetIngredients(food, withDesc: true);
+                if (ingredientsDesc.Length > 0) extra["dishIngredientsDesc"] = ingredientsDesc;
+            }
+            else if (!string.IsNullOrWhiteSpace(dish))
+            {
+                extra["dish"] = dish;
+            }
             if (!string.IsNullOrWhiteSpace(rating)) extra["rating"] = rating;
 
             var context = new GenerationContext
@@ -767,73 +736,16 @@ internal static class NightBubblePatch
         }
     }
 
-    /// <summary>气泡已出现的登记路径（闲聊/未预生成的评价）：登记后立即写占位符，消除原文停留。</summary>
+    /// <summary>气泡已出现的登记路径（闲聊/评价）：登记后立即写占位符，消除原文停留。</summary>
     private static void RegisterBubble(DialogBoxUI box, IntPtr boxPtr, string characterKey, int characterId,
-        ChatScene scene, string original, string? dish, string? rating, bool isSpecial)
+        ChatScene scene, string original, string? dish, string? rating, bool isSpecial,
+        GameData.Core.Collections.Sellable? food = null)
     {
-        var pending = CreatePending(characterKey, characterId, scene, original, dish, rating, isSpecial);
+        var pending = CreatePending(characterKey, characterId, scene, original, dish, rating, isSpecial, food);
         if (pending == null) return;
         pending.BoxPtr = boxPtr;
         pending.Box = box;
         WritePlaceholder(box);
-    }
-
-    /// <summary>
-    /// 评价预生成：HasEvaluated 翻转当刻登记，气泡出现时 AI 往往已就绪 → 第一轮扫到直接改写。
-    /// rating 此刻读不到（decomp 确认控制器没有存储本次 EvaluationResult 的字段，evaluationType 只是
-    /// PostEvaluation 的闭包局部变量）→ 不带 rating 生成，prompt 降级；气泡出现时读到的 rating 仅用于日志。
-    /// </summary>
-    private static void RegisterPreEvaluation(GuestGroupController controller, ControllerState state)
-    {
-        try
-        {
-            var ptr = controller.Pointer;
-            if (FindAwaitingEval(ptr) != null) return; // 同一控制器已有预生成任务
-
-            string characterKey;
-            int characterId;
-            bool isSpecial;
-            var special = controller.TryCast<SpecialGuestsController>();
-            if (special?.SpecialGuest != null)
-            {
-                var guest = special.SpecialGuest;
-                characterKey = guest.stringId;
-                characterId = guest.Id;
-                isSpecial = true;
-            }
-            else
-            {
-                // 普通客人同样享受预生成（受开关控制）
-                if (!PluginContext.Settings.NormalGuestAiEnabled) return;
-                var normal = controller.TryCast<NormalGuestsController>();
-                if (normal == null) return;
-                var identity = FindNormalGuestIdentity(normal);
-                if (identity == null) return;
-                characterKey = identity.Value.Name;
-                characterId = identity.Value.Id;
-                isSpecial = false;
-            }
-
-            var pending = CreatePending(characterKey, characterId, ChatScene.Evaluation,
-                string.Empty, state.Dish, null, isSpecial);
-            if (pending == null) return;
-            pending.ControllerPtr = ptr;
-            PluginContext.Log.LogInfo(
-                $"[MystiaAI] NightBubble: 评价预生成已登记（{characterKey}），等气泡出现绑定");
-        }
-        catch (Exception ex)
-        {
-            PluginContext.Log.LogError($"[MystiaAI] NightBubble 预生成登记异常: {ex}");
-        }
-    }
-
-    /// <summary>查某控制器未绑定的预生成评价任务。</summary>
-    private static PendingBubble? FindAwaitingEval(IntPtr controllerPtr)
-    {
-        foreach (var p in Pending)
-            if (!p.Resolved && p.Box == null && p.Scene == ChatScene.Evaluation && p.ControllerPtr == controllerPtr)
-                return p;
-        return null;
     }
 
     /// <summary>AI 未就绪时把气泡文本改为占位符（失败时 TryFinalize 会还原原文）。</summary>
