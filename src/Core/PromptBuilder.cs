@@ -42,6 +42,8 @@ public static class PromptBuilder
         var vars = BuildVars(context, persona, language, max);
 
         var system = PluginContext.Prompts.RenderSystem(vars);
+        // 长期记忆：作为 {memories} 模板变量注入 User 提示词（见 BuildVars/RenderUser），
+        // 用户可在 prompts.json 的 User 模板任意位置放置；模板无挂点时由 RenderUser 兜底追加。
 
         // 多段对话改写：Patch 层传入整段原文，只改写属于当前角色的那一句
         if (context.Extra.TryGetValue("transcript", out var transcript) && !string.IsNullOrWhiteSpace(transcript)
@@ -116,6 +118,20 @@ public static class PromptBuilder
     private static int EffectiveMaxLength(GenerationContext context)
     {
         return context.MaxLength > 0 ? context.MaxLength : 50;
+    }
+
+    /// <summary>
+    /// 长期记忆段（Extra["memories"]，空串=无记忆）：过去对话的原文尾部片段，
+    /// 让角色自然地承接之前聊过的话题；引导语强调「可以提及、不要每句都提」，
+    /// 与报纸段同一分寸策略，避免 AI 句句翻旧账。
+    /// </summary>
+    private static string BuildMemoriesSection(GenerationContext context)
+    {
+        if (!context.Extra.TryGetValue("memories", out var memories)
+            || string.IsNullOrWhiteSpace(memories))
+            return string.Empty;
+        return
+            $"你们过去的对话记忆（以下是你与米斯蒂娅之前聊过的内容，可以自然地提及，但不要每句都提）：\n{memories.TrimEnd()}";
     }
 
     /// <summary>
@@ -229,6 +245,10 @@ public static class PromptBuilder
             bondTone = PluginContext.Personas.GetBondTone(bondKey, context.KizunaLevel);
         }
 
+        // 长期记忆段：开关（MemoryEnabled）关闭或注入条数为 0 时恒为空；
+        // 模板写 {memories} 即替换，未写则由 RenderUser 兜底追加
+        var memories = BuildMemoriesSection(context);
+
         return new Dictionary<string, string>
         {
             ["characterName"] = context.CharacterName ?? string.Empty,
@@ -247,17 +267,31 @@ public static class PromptBuilder
             ["rating"] = ExtraOr(context, "rating", "普通"),
             ["news"] = BuildNewsSection(context),
             ["playerReply"] = PlayerReplySection(context),
+            ["memories"] = memories, // 长期记忆段（模板变量 {memories}）
             ["npcLine"] = string.Empty, // 回复选项路径覆盖
             ["optionCount"] = "2",      // 回复选项路径覆盖
         };
     }
 
-    /// <summary>渲染 user 模板并收尾：折叠多余空行（报纸未注入时不留空白），去首尾空白。</summary>
+    /// <summary>
+    /// 渲染 user 模板并收尾：折叠多余空行（报纸未注入时不留空白），去首尾空白。
+    /// 长期记忆兜底：模板里没写 {memories} 时（旧版 prompts.json 或用户自定义模板未放置），
+    /// 若记忆非空则追加到末尾——保证记忆功能在任何模板下都生效；
+    /// 模板写了 {memories} 则已在渲染时替换，此处检测到内容已含记忆文本不会重复追加。
+    /// </summary>
     private static string RenderUser(PromptTemplateStore.UserKind kind, Dictionary<string, string> vars)
     {
         var text = PluginContext.Prompts.RenderUser(kind, vars);
         while (text.Contains("\n\n")) text = text.Replace("\n\n", "\n");
-        return text.Trim();
+        var trimmed = text.Trim();
+
+        // 兜底：模板未放置 {memories} 且记忆非空 → 追加到末尾（兼容旧 prompts.json）
+        if (vars.TryGetValue("memories", out var memories) && !string.IsNullOrWhiteSpace(memories)
+            && !trimmed.Contains("你们过去的对话记忆"))
+        {
+            trimmed = (trimmed.Length > 0 ? trimmed + "\n" : "") + memories.Trim();
+        }
+        return trimmed;
     }
 
     /// <summary>玩家上一句回应段（自由输入或选项面板）：有则整句带承接引导，无则空串。</summary>

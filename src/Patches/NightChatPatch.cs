@@ -241,6 +241,8 @@ internal static class NightChatPatch
             ["characterKey"] = characterKey,
             ["location"] = "夜晚居酒屋营业中",
             ["news"] = NewspaperReader.GetTodayNewsSummary(),
+            // 长期记忆：该角色最近几段对话的原文尾部（空串=无记忆，prompt 侧判空）
+            ["memories"] = MemoryStore.GetRecentText(characterKey, PluginContext.Settings.MemoryInjectCount),
         };
         if (!string.IsNullOrWhiteSpace(dish)) extra["dish"] = dish;
         if (!string.IsNullOrWhiteSpace(rating)) extra["rating"] = rating;

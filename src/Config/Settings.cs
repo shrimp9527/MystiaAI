@@ -60,6 +60,15 @@ public sealed class Settings
     /// <summary>启用羁绊提示词（{bondTone} 变量注入），默认关闭；关闭时该变量恒为空。</summary>
     public bool BondPromptEnabled { get; set; } = false;
 
+    /// <summary>长期记忆总开关：对话结束时把 transcript 尾部存入 memories.json，下次同角色对话时注入 prompt。</summary>
+    public bool MemoryEnabled { get; set; } = true;
+
+    /// <summary>每个角色最多保留的记忆条数（超出丢最旧）。</summary>
+    public int MemoryMaxPerCharacter { get; set; } = 10;
+
+    /// <summary>每次生成台词时注入的最近记忆条数（0=不注入）。</summary>
+    public int MemoryInjectCount { get; set; } = 3;
+
     private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
         WriteIndented = true,
@@ -152,6 +161,9 @@ public sealed class Settings
         NewsKeywordTrigger = NewsKeywordTrigger,
         Temperature = Temperature,
         BondPromptEnabled = BondPromptEnabled,
+        MemoryEnabled = MemoryEnabled,
+        MemoryMaxPerCharacter = MemoryMaxPerCharacter,
+        MemoryInjectCount = MemoryInjectCount,
     };
 
     private void ReadFrom(string json)
@@ -171,6 +183,9 @@ public sealed class Settings
         if (dto.NewsKeywordTrigger.HasValue) NewsKeywordTrigger = dto.NewsKeywordTrigger.Value;
         if (dto.Temperature.HasValue) Temperature = Math.Clamp(dto.Temperature.Value, 0f, 2f);
         if (dto.BondPromptEnabled.HasValue) BondPromptEnabled = dto.BondPromptEnabled.Value;
+        if (dto.MemoryEnabled.HasValue) MemoryEnabled = dto.MemoryEnabled.Value;
+        if (dto.MemoryMaxPerCharacter.HasValue) MemoryMaxPerCharacter = Math.Clamp(dto.MemoryMaxPerCharacter.Value, 1, 200);
+        if (dto.MemoryInjectCount.HasValue) MemoryInjectCount = Math.Clamp(dto.MemoryInjectCount.Value, 0, 20);
     }
 
     /// <summary>从旧 BepInEx cfg 读取同名字段（只读不写；文件不存在时 Bind 会给默认值，正好当出厂值）。</summary>
@@ -189,6 +204,9 @@ public sealed class Settings
         NewsKeywordTrigger = cfg.Bind("AI", "NewsKeywordTrigger", true).Value;
         Temperature = cfg.Bind("AI", "Temperature", 0.8f).Value;
         BondPromptEnabled = cfg.Bind("AI", "BondPromptEnabled", false).Value;
+        MemoryEnabled = cfg.Bind("AI", "MemoryEnabled", true).Value;
+        MemoryMaxPerCharacter = cfg.Bind("AI", "MemoryMaxPerCharacter", 10).Value;
+        MemoryInjectCount = cfg.Bind("AI", "MemoryInjectCount", 3).Value;
         // WebPort 已废弃（网页改为纯静态页，不再有本地服务），不迁移
     }
 
@@ -208,6 +226,9 @@ public sealed class Settings
         [JsonPropertyName("newsKeywordTrigger")] public bool? NewsKeywordTrigger { get; set; }
         [JsonPropertyName("temperature")] public float? Temperature { get; set; }
         [JsonPropertyName("bondPromptEnabled")] public bool? BondPromptEnabled { get; set; }
+        [JsonPropertyName("memoryEnabled")] public bool? MemoryEnabled { get; set; }
+        [JsonPropertyName("memoryMaxPerCharacter")] public int? MemoryMaxPerCharacter { get; set; }
+        [JsonPropertyName("memoryInjectCount")] public int? MemoryInjectCount { get; set; }
     }
 }
 

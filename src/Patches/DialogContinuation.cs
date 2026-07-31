@@ -142,22 +142,30 @@ internal static class DialogContinuation
             if (snapshot.Value.ExitRequested)
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 玩家已选择结束对话，不再续聊");
+                TryRecordMemory(key, snapshot.Value.Transcript);
                 return;
             }
             if (!snapshot.Value.HadInput)
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 本轮无玩家输入（独白包/挂机），不续聊");
+                // 独白/挂机无交互内容，不记记忆
                 return;
             }
             if (entry.Rounds >= MaxRounds)
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 已达轮数安全上限 {MaxRounds}，停止续聊");
+                TryRecordMemory(key, snapshot.Value.Transcript);
                 return;
             }
-            if (!IsDayPhase()) return;
+            if (!IsDayPhase())
+            {
+                TryRecordMemory(key, snapshot.Value.Transcript); // 离开白天场景，对话被截断也记录
+                return;
+            }
             if (OpenDialogMenuPatch.RecentlyOpened(TimeSpan.FromSeconds(2)))
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 结束后有其他对话接棒（如羁绊事件），不续聊");
+                TryRecordMemory(key, snapshot.Value.Transcript);
                 return;
             }
 
@@ -246,6 +254,25 @@ internal static class DialogContinuation
         }
     }
 
+    /// <summary>真正关闭残留的聊后选项菜单面板（含隐藏中的实例），防止面板栈在对话间隙还原其视觉造成闪回。</summary>    /// <summary>
+    /// 对话真正结束时记录长期记忆（MemoryStore.Record 内部会截取 transcript 尾部、
+    /// 去重、按配置上限裁剪）。失败只记日志，不影响对话流程。
+    /// </summary>
+    private static void TryRecordMemory(string key, string transcript)
+    {
+        try
+        {
+            if (!Entries.TryGetValue(key, out var entry)) return;
+            if (string.IsNullOrWhiteSpace(entry.CharacterKey)) return;
+            MemoryStore.Record(entry.CharacterKey, transcript,
+                DialogPannelPatch.GetGameTimeText(), ChatScene.DayChat.ToString());
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] 记忆记录失败（不影响对话）: {ex.Message}");
+        }
+    }
+
     /// <summary>真正关闭残留的聊后选项菜单面板（含隐藏中的实例），防止面板栈在对话间隙还原其视觉造成闪回。</summary>
     private static void CloseLingeringChatMenu()
     {
@@ -265,8 +292,7 @@ internal static class DialogContinuation
     }
 
     /// <summary>transcript 超限时按行丢弃最旧内容。</summary>
-    private static string Cap(string transcript)
-    {
+    private static string Cap(string transcript)    {
         if (string.IsNullOrEmpty(transcript) || transcript.Length <= CarriedTranscriptLimit)
             return transcript ?? string.Empty;
         var cut = transcript.Length - CarriedTranscriptLimit;
