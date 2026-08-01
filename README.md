@@ -41,8 +41,8 @@
 
 ## 安装
 
-1. 下载 BepInEx 6 IL2CPP 版（[BepInEx 官方构建下载页](https://builds.bepinex.dev/projects/bepinex_be)，大多数情况下选择BepInEx-Unity.IL2CPP-win-x64压缩包，不是此系统版本自行判断），解压到游戏根目录，运行一次游戏让其完成初始化
-2. 从 [Releases](https://github.com/shrimp9527/MystiaAI/releases) 下载 `MystiaAI.dll`（[最新版直链](https://github.com/shrimp9527/MystiaAI/releases/latest/download/MystiaAI.dll)），放入 `游戏根目录/BepInEx/plugins/`
+1. 下载 BepInEx 6 IL2CPP 版（[BepInEx 官方构建下载页](https://builds.bepinex.dev/projects/bepinex_be)，大多数情况下选择`BepInEx-Unity.IL2CPP-win-x64`[下载直链](https://builds.bepinex.dev/projects/bepinex_be/785/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785%2B6abdba4.zip)）压缩包，不是此系统版本自行判断），解压到游戏根目录，运行一次游戏让其完成初始化
+2. 从 [Releases](https://github.com/shrimp9527/MystiaAI/releases) 下载 `MystiaAI.dll`（[下载直链](https://github.com/shrimp9527/MystiaAI/releases/latest/download/MystiaAI.dll)），放入 `游戏根目录/BepInEx/plugins/`
 3. 首次触发 AI 对话后，配置文件生成于 `文档/MystiaAI/`，在 `settings.json` 中填入 API Key 即可
 
 ## 配置
