@@ -15,7 +15,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "cc.mystia.ai";
     public const string PluginName = "MystiaAI";
-    public const string PluginVersion = "0.1.0";
+    public const string PluginVersion = "0.1.7"; // 与最新 Release 标签保持一致（每次发版更新）
 
     internal static new ManualLogSource Log = null!;
 
