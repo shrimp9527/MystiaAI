@@ -47,6 +47,7 @@ public static class PluginContext
     {
         Log = log;
         _settings = Settings.LoadOrCreate(config, log);
+        Log.LogInfo($"[MystiaAI] 配置文件夹：{Settings.StoreDir}");
         Personas = new PersonaStore(log);
         _prompts = new PromptTemplateStore(log);
         MemoryStore.Initialize(log);
