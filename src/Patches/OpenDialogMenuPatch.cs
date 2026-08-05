@@ -84,6 +84,13 @@ internal static class OpenDialogMenuPatch
                 PinnedFinishWrapManaged[capturedKey] = managed;
                 PinnedFinishWrap[capturedKey] = wrapped;
                 onFinishCallback = wrapped;
+
+                // 首轮即 Manual 模式打开：整段对话期间面板不关，轮间零闪烁（失败回退原流程）
+                if (DialogContinuation.TryOpenManualFirst(key, dialogPackage, onFinishCallback))
+                {
+                    PluginContext.Log.LogInfo($"[MystiaAI] OpenDialogMenu: 包 {key} 已改为 Manual 模式打开（续聊零闪烁）");
+                    return false; // 原 OpenDialogMenu 不再执行
+                }
             }
 
             if (overrideReplaceTextCallback != null) return true; // 游戏/其他 mod 已提供回调，不覆盖

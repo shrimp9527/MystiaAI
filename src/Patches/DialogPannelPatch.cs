@@ -16,6 +16,10 @@ using MystiaAI.UI;
 using Il2CppDict = Il2CppSystem.Collections.Generic.Dictionary<int, string>;
 using Il2CppReadOnlyDict = Il2CppSystem.Collections.Generic.IReadOnlyDictionary<int, string>;
 using DialogLineData = Il2CppSystem.ValueTuple<Common.DialogUtility.DialogMeta, Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Common.DialogUtility.LoadedDialogActionData>>;
+using Il2CppDialogPack = Il2CppSystem.Collections.Generic.IReadOnlyList<Il2CppSystem.Collections.Generic.KeyValuePair<Il2CppSystem.ValueTuple<Common.DialogUtility.DialogMeta, Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Common.DialogUtility.LoadedDialogActionData>>, string>>;
+using Il2CppSpriteArray = DEYU.AssetHandleUtility.IAssetHandleArray<UnityEngine.Sprite>;
+using Il2CppSpecialPortrayals = Il2CppSystem.Collections.Generic.IReadOnlyDictionary<int, DEYU.AssetHandleUtility.IAssetHandleArray<UnityEngine.Sprite>>;
+using Il2CppOverrideSprites = Il2CppSystem.Collections.Generic.IReadOnlyDictionary<Common.DialogUtility.DialogMeta, DEYU.AssetHandleUtility.IAssetHandle<UnityEngine.Sprite>>;
 
 namespace MystiaAI.Patches;
 
@@ -116,6 +120,16 @@ internal static class DialogPannelPatch
 
         /// <summary>玩家点了「结束对话」：本轮播完后不再自动续聊（DialogContinuation 检查）。</summary>
         public bool ExitRequested;
+
+        /// <summary>本轮已发出过轮末信号（Interact postfix 用，防一次轮末多次触发）。</summary>
+        public bool RoundEndSignaled;
+
+        // ---- Manual 续聊同面板重播的缓存参数（第一轮打开时由 Core 前缀原样缓存，无需重建）----
+        public Il2CppDialogPack? ReplayDialogPack;
+        public Il2CppReadOnlyDict? ReplayTextFile;
+        public Il2CppSpriteArray? ReplayPlayerPortrayal;
+        public Il2CppSpecialPortrayals? ReplaySpecialPortrayals;
+        public Il2CppOverrideSprites? ReplayOverrideSprites;
     }
 
     /// <summary>手动注册本类的全部 patch，并输出自检日志。任何一步失败都会 LogError。</summary>
@@ -206,6 +220,17 @@ internal static class DialogPannelPatch
             prefix: nameof(GuardWhileOverlayOpen),
             postfix: null);
 
+        // 轮末信号（Manual 重播轮没有游戏侧播完回调 DialogPannel.cs:920，靠它接续续聊链）：
+        // 越过末句的推进（玩家 J / 自动推进都走 Interact）→ postfix 侦测
+        PatchMethod(
+            harmony,
+            targetName: "Interact",
+            match: parameters => parameters.Length == 1
+                                 && parameters[0].ParameterType.FullName != null
+                                 && parameters[0].ParameterType.FullName.Contains("CallbackContext"),
+            prefix: null,
+            postfix: nameof(Interact_Postfix));
+
         DumpAllPatchedMethods();
     }
 
@@ -281,7 +306,11 @@ internal static class DialogPannelPatch
 
     // ---- 以下为 patch 本体（无 Harmony 特性，由 Install 手动注册）----
 
-    private static void OnExecutingDialogLoopCore_Prefix(DialogPannel __instance, ref Il2CppReadOnlyDict textFile)
+    private static void OnExecutingDialogLoopCore_Prefix(DialogPannel __instance,
+        Il2CppDialogPack dialogPack, ref Il2CppReadOnlyDict textFile,
+        Il2CppSpriteArray playerPortrayalCollection,
+        Il2CppSpecialPortrayals specialNPCPortrayalCollectionDictionary,
+        Il2CppOverrideSprites overrideDialogMetaToSprites)
     {
         try
         {
@@ -386,6 +415,13 @@ internal static class DialogPannelPatch
 
             Active.Remove(__instance);
             Active.Add(__instance, active);
+
+            // 缓存重播参数（Manual 续聊同面板重播用：游戏不存这些局部变量，我们原样缓存）
+            active.ReplayDialogPack = dialogPack;
+            active.ReplayTextFile = textFile;
+            active.ReplayPlayerPortrayal = playerPortrayalCollection;
+            active.ReplaySpecialPortrayals = specialNPCPortrayalCollectionDictionary;
+            active.ReplayOverrideSprites = overrideDialogMetaToSprites;
 
             // 续聊承接：上一轮以玩家说话收尾时，开头的玩家回合组预置空决策，
             // 整组静默略过（不弹输入框、不进 transcript），NPC 直接承接玩家上句话回应
@@ -566,6 +602,7 @@ internal static class DialogPannelPatch
     {
         FreeInputOverlay.PollHotkeys();
         MainThreadDispatcher.Drain(); // 先 Poll 后 drain：Poll 入队的 Close 同帧即可执行
+        DialogContinuation.PollReplayWatchers(); // Manual 重播协程完成侦测（续聊链条的接续信号）
         NightBubblePatch.OnEventSystemFrame(); // 夜晚气泡帧泵（同链复用本 postfix，内部 30 帧节流 + 相位闸门）
     }
 
@@ -573,6 +610,64 @@ internal static class DialogPannelPatch
     private static void OnGUI_Postfix()
     {
         MainThreadDispatcher.DrainFromOnGUI(); // Update 通道活着时是空操作（OnGUI 事件内不做原生 UI 调用）
+    }
+
+    /// <summary>
+    /// 轮末信号（Manual 重播轮没有游戏侧播完回调 DialogPannel.cs:920，靠它接续续聊链）：
+    /// Interact 命中且面板处于等待推进状态（m_IsSelectionOpen=false，打字中/首按跳过不误判），
+    /// 且最后一段已定型（NPC 句 Resolved / Self 句已记录输入）→ 这次推进越过末句结束本轮，
+    /// 缓一拍走 OnRoundFinished。每轮（ActiveReplacement 实例）只触发一次。
+    /// </summary>
+    private static void Interact_Postfix(DialogPannel __instance)
+    {
+        try
+        {
+            if (!PluginContext.Settings.Enabled) return;
+            if (__instance == null) return;
+            if (UnityObjectGuard.IsDead(__instance)) return;
+            try
+            {
+                if (__instance.m_IsSelectionOpen) return; // 还在打字/选择中：这次只是跳过打字，不是推进
+            }
+            catch { return; } // 字段读不到就不发信号（保守）
+            if (!Active.TryGetValue(__instance, out var active) || active == null) return;
+            if (active.RoundEndSignaled) return;
+
+            var segs = active.Replacement.Segments;
+            for (var i = segs.Count - 1; i >= 0; i--)
+            {
+                var seg = segs[i];
+                if (!active.Originals.TryGetValue(seg.DialogId, out var lastOriginal)) continue;
+                if (seg.IsSelf)
+                {
+                    // 末句 Self：必须已记录输入且当前正停在该句（防早于末句的 Interact 误触发）
+                    if (!active.PlayerInputs.ContainsKey(seg.DialogId)) return;
+                    if (!active.SelfLines.TryGetValue(lastOriginal, out var selfEntry)
+                        || !ReferenceEquals(active.CurrentSelfEntry, selfEntry)) return;
+                }
+                else
+                {
+                    // 末句 NPC：必须当前正停在该句
+                    if (!active.NpcByDialogId.TryGetValue(seg.DialogId, out var e)) return;
+                    if (!ReferenceEquals(active.CurrentLine, e)) return;
+                }
+                break;
+            }
+
+            active.RoundEndSignaled = true;
+            var key = active.PackageKey;
+            PluginContext.Log.LogInfo($"[MystiaAI] DialogPannel: 包 {key} 检测到末句推进（轮末信号）");
+            _ = Task.Run(async () =>
+            {
+                try { await Task.Delay(50).ConfigureAwait(false); }
+                catch { /* 忽略，照常派发 */ }
+                MainThreadDispatcher.Post(() => DialogContinuation.OnRoundFinished(key));
+            });
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] DialogPannelPatch.Interact_Postfix 异常: {ex.Message}");
+        }
     }
 
     /// <summary>按键锁定：覆盖层打开期间跳过 DialogPannel 的全部 InputAction 回调。</summary>
@@ -935,11 +1030,66 @@ internal static class DialogPannelPatch
         {
             if (UnityObjectGuard.IsDead(panel)) return;
             if (Active.TryGetValue(panel!, out var active) && active != null)
+            {
                 active.ExitRequested = true;
+                // 玩家没按 J（走的是结束对话按钮）时轮末信号不会触发，重播协程死亡探测又不可靠——
+                // 显式终止意图必须必达：缓一拍直接驱动一轮结束流程（ExitRequested → 真关板）
+                var key = active.PackageKey;
+                _ = Task.Run(async () =>
+                {
+                    try { await Task.Delay(200).ConfigureAwait(false); }
+                    catch { /* 忽略，照常派发 */ }
+                    MainThreadDispatcher.Post(() => DialogContinuation.OnRoundFinished(key, force: true));
+                });
+            }
         }
         catch (Exception ex)
         {
             PluginContext.Log.LogWarning($"[MystiaAI] MarkExitRequested 异常: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 同面板重播一轮对话（Manual 续聊：面板不关、零闪烁）。复位易残留状态后用第一轮缓存的
+    /// 原参数重跑对话主循环（UniTask await IEnumerator 换成 Unity 原生协程驱动，WaitUntil 原生支持）。
+    /// 找不到面板/参数/调用失败返回 false（调用方回退为 Manual 新开面板）。
+    /// </summary>
+    internal static bool TryReplayInPlace(string packageKey)
+    {
+        try
+        {
+            foreach (var kv in Active)
+            {
+                var active = kv.Value;
+                if (active == null || active.PackageKey != packageKey) continue;
+                var panel = kv.Key;
+                if (UnityObjectGuard.IsDead(panel)) return false;
+                if (active.ReplayDialogPack == null || active.ReplayTextFile == null) return false;
+
+                // 复位清单（逆向审计）：fastForwardMode/shouldKeepSkipping 残留会让新一轮秒跳过
+                try { panel.fastForwardMode = false; } catch { /* 字段写入失败跳过 */ }
+                try { panel.shouldKeepSkipping = false; } catch { /* 同上 */ }
+                try { panel.hasInteracted = false; } catch { /* 同上 */ }
+                try { panel.ExitCode = -1; } catch { /* 同上 */ }
+                try { panel.EndSkipTiming(); } catch { /* 清跳过进度环，失败无碍 */ }
+
+                var routine = panel.OnExecutingDialogLoopInternal(
+                    active.ReplayDialogPack, active.ReplayTextFile,
+                    active.ReplayPlayerPortrayal, active.ReplaySpecialPortrayals,
+                    active.ReplayOverrideSprites, null, false);
+                // Manual 面板的播完回调只对开板首个循环触发一次；重播协程的完成靠对象假死侦测
+                var coroutine = panel.StartCoroutine(routine);
+                DialogContinuation.WatchReplayCompletion(packageKey, coroutine, panel);
+                PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {packageKey} 已在同面板重播");
+                return true;
+            }
+            PluginContext.Log.LogWarning($"[MystiaAI] 同面板重播：找不到包 {packageKey} 的面板记录");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogError($"[MystiaAI] 同面板重播失败（{packageKey}）: {ex}");
+            return false;
         }
     }
 

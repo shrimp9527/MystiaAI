@@ -44,6 +44,31 @@ internal static class DialogContinuation
 
         /// <summary>上次处理结束回调的时刻（防抖：重开撞上未关完的面板会导致结束回调二次触发）。</summary>
         public System.DateTime LastFinishUtc = System.DateTime.MinValue;
+
+        /// <summary>退出已处理（结束回调链会多次触发，退出路径必须幂等：记忆/关板/恢复输入只做一次）。</summary>
+        public bool ExitHandled;
+
+        /// <summary>Manual 模式回调捕获的「开始播首句」动作（loadFinish 时调用放行首轮）。</summary>
+        public Il2CppSystem.Action? StartPlay;
+
+        /// <summary>Manual 模式回调捕获的「退出关板」动作；非 null 表示当前是 Manual 常驻面板（续聊同面板重播用）。</summary>
+        public Il2CppSystem.Action? ExitAction;
+
+        /// <summary>游戏自己的结束回调（恢复 NPC/重开聊后菜单），整段对话真正结束时由 CloseIfManual 调用。</summary>
+        public Il2CppSystem.Action? GameFinishCallback;
+    }
+
+    /// <summary>Manual 模式四个回调的钉住包（managed 中间委托 + IL2CPP 包装一并钉住，防 GC 死 thunk）。</summary>
+    private sealed class ManualSuite
+    {
+        public System.Action? MContinue;
+        public System.Action<Il2CppSystem.Action>? MPlayFirst;
+        public System.Action<Il2CppSystem.Action>? MCanExit;
+        public System.Action? MLoadFinish;
+        public Il2CppSystem.Action? Continue;
+        public Il2CppSystem.Action<Il2CppSystem.Action>? PlayFirst;
+        public Il2CppSystem.Action<Il2CppSystem.Action>? CanExit;
+        public Il2CppSystem.Action? LoadFinish;
     }
 
     private static readonly Dictionary<string, Entry> Entries = new();
@@ -51,6 +76,9 @@ internal static class DialogContinuation
     /// <summary>每个包 key 钉一份「我们自己的」结束回调（进程生命周期内不释放）。</summary>
     private static readonly Dictionary<string, Il2CppSystem.Action> PinnedFinish = new();
     private static readonly Dictionary<string, System.Action> PinnedFinishManaged = new();
+
+    /// <summary>Manual 模式回调钉住表（按包 key）。</summary>
+    private static readonly Dictionary<string, ManualSuite> PinnedManual = new();
 
     /// <summary>DayChatPatch 登记：新一轮对话开始（重置跨轮记录与轮数）；续聊重开不经过这里。</summary>
     public static void Register(DialogPackage package, PendingReplacement replacement)
@@ -62,7 +90,42 @@ internal static class DialogContinuation
             Package = package,
             CharacterKey = replacement.CharacterKey,
             Segments = replacement.Segments,
-        };
+        }; // ExitAction/StartPlay/GameFinishCallback 均为新实例初始 null，自动复位
+    }
+
+    /// <summary>Manual 直开重入保护（防御：若游戏内部实现又走 OpenDialogMenu，避免递归重定向）。</summary>
+    private static bool _manualOpening;
+
+    /// <summary>
+    /// 首轮即用 Manual 模式打开（OpenDialogMenuPatch 重定向调用）：整段对话期间面板不关，
+    /// 轮间零闪烁。wrappedFinish = 已包装的游戏结束回调（真正散场时调用）。
+    /// </summary>
+    public static bool TryOpenManualFirst(string key, DialogPackage package, Il2CppSystem.Action wrappedFinish)
+    {
+        if (_manualOpening) return false;
+        try
+        {
+            if (!PluginContext.Settings.Enabled) return false;
+            if (!Entries.TryGetValue(key, out var entry)) return false;
+            entry.GameFinishCallback = wrappedFinish;
+            entry.ExitAction = null;
+            entry.StartPlay = null;
+            _manualOpening = true;
+            try
+            {
+                OpenManualRound(key, entry);
+            }
+            finally
+            {
+                _manualOpening = false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogError($"[MystiaAI] Manual 直开失败（{key}，回退普通打开）: {ex}");
+            return false;
+        }
     }
 
     /// <summary>该包是否已登记续聊（OpenDialogMenuPatch 据此决定是否包装结束回调）。</summary>
@@ -120,52 +183,71 @@ internal static class DialogContinuation
         return action;
     }
 
-    /// <summary>一轮播完（游戏的结束回调链触发，主线程）：检查停止条件，快照记录，延时重开。</summary>
-    public static void OnRoundFinished(string key)
+    /// <summary>一轮播完（游戏的结束回调链触发，主线程）：检查停止条件，快照记录，延时重开。
+    /// force = 玩家显式终止（「结束对话」按钮的直达驱动）：跳过防抖——1 秒防抖只针对同一轮
+    /// 结束回调的重复触发，绝不能吞掉退出意图（吞了 GameFinishCallback 不会执行，玩家输入永久锁死）。</summary>
+    public static void OnRoundFinished(string key, bool force = false)
     {
         try
         {
             if (!PluginContext.Settings.Enabled) return;
             if (!Entries.TryGetValue(key, out var entry)) return;
 
-            // 防抖：结束回调可能二次触发（重开间隔短、撞上未关完的池化面板），1 秒内只认一次
-            var now = System.DateTime.UtcNow;
-            if ((now - entry.LastFinishUtc).TotalMilliseconds < 1000)
-            {
-                PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 1 秒内的重复结束回调，忽略");
-                return;
-            }
-            entry.LastFinishUtc = now;
-
             var snapshot = DialogPannelPatch.SnapshotRound(key);
-            if (snapshot == null) return; // 非 AI 对话（未经过我们的面板替换流程）
+            var isExit = force || snapshot?.ExitRequested == true;
+
+            // 防抖：结束回调可能二次触发（重开间隔短、撞上未关完的池化面板），1 秒内只认一次。
+            // 退出意图（玩家点「结束对话」）不受此窗口限制。
+            if (!isExit)
+            {
+                var now = System.DateTime.UtcNow;
+                if ((now - entry.LastFinishUtc).TotalMilliseconds < 1000)
+                {
+                    PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 1 秒内的重复结束回调，忽略");
+                    return;
+                }
+                entry.LastFinishUtc = now;
+            }
+
+            if (snapshot == null)
+            {
+                if (isExit) CloseIfManual(key, entry); // 快照缺失但玩家明确要退：尽力关板恢复输入
+                return; // 非 AI 对话（未经过我们的面板替换流程）
+            }
             if (snapshot.Value.ExitRequested)
             {
+                if (entry.ExitHandled) return; // 退出已处理（结束回调链多次触发），幂等返回
+                entry.ExitHandled = true;
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 玩家已选择结束对话，不再续聊");
                 TryRecordMemory(key, snapshot.Value.Transcript);
+                CloseIfManual(key, entry);
                 return;
             }
             if (!snapshot.Value.HadInput)
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 本轮无玩家输入（独白包/挂机），不续聊");
                 // 独白/挂机无交互内容，不记记忆
+                CloseIfManual(key, entry);
                 return;
             }
             if (entry.Rounds >= MaxRounds)
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 已达轮数安全上限 {MaxRounds}，停止续聊");
                 TryRecordMemory(key, snapshot.Value.Transcript);
+                CloseIfManual(key, entry);
                 return;
             }
             if (!IsDayPhase())
             {
                 TryRecordMemory(key, snapshot.Value.Transcript); // 离开白天场景，对话被截断也记录
+                CloseIfManual(key, entry);
                 return;
             }
             if (OpenDialogMenuPatch.RecentlyOpened(TimeSpan.FromSeconds(2)))
             {
                 PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 结束后有其他对话接棒（如羁绊事件），不续聊");
                 TryRecordMemory(key, snapshot.Value.Transcript);
+                CloseIfManual(key, entry);
                 return;
             }
 
@@ -173,9 +255,9 @@ internal static class DialogContinuation
             entry.SkipLeadingSelfNextRound = snapshot.Value.EndedWithPlayerSpeech;
             entry.Rounds++;
             var round = entry.Rounds;
-            // 防闪回：点「闲聊」时菜单只是隐藏未出栈，第一轮对话框关闭时栈会把它还原出来
-            // （续聊重开前的几百毫秒里闪现一次）。这里先把它真正关掉，栈里就没有可还原的了
-            CloseLingeringChatMenu();
+            // 注意：不得在此关闭残留的聊后菜单——Manual 模式下对话框面板始终开着，
+            // 关它下面的菜单违反面板栈顺序（ClosePanel 抛 InvalidOperationException 并损坏栈记账，
+            // 后续关对话框会 NRE 卡死）。菜单被 HideVisual 压着不会闪回，散场时随栈自然恢复。
             PluginContext.Log.LogInfo(
                 $"[MystiaAI] 续聊: 包 {key} 第 {round} 轮已排队（携带记录 {entry.CarriedTranscript.Length} 字）");
             _ = Task.Run(async () =>
@@ -222,20 +304,166 @@ internal static class DialogContinuation
                 CarriedTranscript = entry.CarriedTranscript,
                 SkipLeadingSelf = entry.SkipLeadingSelfNextRound,
             });
-            UniversalGameManager.OpenDialogMenu(
-                entry.Package,
-                GetOwnFinishCallback(key),
-                null,
-                // HideVisual：打开新一轮对话时隐藏下层残留面板（点「闲聊」时被 ClosePanel
-                // 但未出栈的选项菜单，会在上一轮对话框关闭时被面板栈自动还原视觉，
-                // 与续聊对话重叠）；对话全部结束后菜单视觉自然恢复
-                AdpUIPanelManager.PanelVisualMode.HideVisual);
-            PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 第 {round} 轮已重开");
+
+            if (entry.ExitAction != null)
+            {
+                // Manual 常驻面板：不关板，同面板直接重播（零闪烁）
+                if (DialogPannelPatch.TryReplayInPlace(key))
+                {
+                    PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 第 {round} 轮已同面板重播");
+                    return;
+                }
+                PluginContext.Log.LogWarning($"[MystiaAI] 续聊: 包 {key} 同面板重播失败，回退为 Manual 新开面板");
+                CloseIfManual(key, entry);
+            }
+
+            // 首轮续聊（或重播失败回退）：Manual 模式打开——播完不关板，后续轮次同面板重播
+            OpenManualRound(key, entry);
+            PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 第 {round} 轮已重开（Manual 模式）");
         }
         catch (Exception ex)
         {
             PluginContext.Log.LogError($"[MystiaAI] DialogContinuation.Reopen 异常（{key}）: {ex}");
         }
+    }
+
+    /// <summary>Manual 模式打开新一轮：面板播完不关板，回调驱动续播/退出。</summary>
+    private static void OpenManualRound(string key, Entry entry)
+    {
+        var suite = GetManualSuite(key);
+        UniversalGameManager.OpenManualDialogMenu(
+            entry.Package,
+            suite.Continue!,
+            suite.PlayFirst!,
+            suite.CanExit!,
+            suite.LoadFinish!,
+            false,
+            AdpUIPanelManager.PanelVisualMode.HideVisual);
+    }
+
+    // ---- 重播协程完成监听（Manual 模式的关键补件）----
+
+    /// <summary>
+    /// Manual 面板播完回调只对开板时的首个循环触发一次（DialogPannel.cs:918-920），
+    /// 我们重播的协程结束没有任何通知——靠协程对象假死来侦测（每帧轮询）。
+    /// </summary>
+    private sealed class ReplayWatch
+    {
+        public string Key = string.Empty;
+        public UnityEngine.Coroutine? Coroutine;
+        public Common.DialogUtility.DialogPannel? Panel;
+    }
+
+    private static readonly List<ReplayWatch> _watchers = new();
+
+    /// <summary>登记一个重播协程的完成监听（TryReplayInPlace 调用）。</summary>
+    public static void WatchReplayCompletion(string key, UnityEngine.Coroutine? coroutine,
+        Common.DialogUtility.DialogPannel? panel)
+    {
+        if (coroutine == null) return;
+        lock (_watchers)
+        {
+            _watchers.Add(new ReplayWatch { Key = key, Coroutine = coroutine, Panel = panel });
+        }
+    }
+
+    /// <summary>协程死活探测：Coroutine 不是 UnityEngine.Object，无 fake-null；包装被回收/原生销毁时访问 Pointer 抛异常即视为结束。</summary>
+    private static bool IsCoroutineDead(UnityEngine.Coroutine? co)
+    {
+        if (co == null) return true;
+        try
+        {
+            _ = co.Pointer;
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    /// <summary>每帧泵（EventSystem.Update 链）：重播协程对象假死 = 该轮播完 → 走正常的一轮结束流程。</summary>
+    public static void PollReplayWatchers()
+    {
+        if (_watchers.Count == 0) return;
+        List<string>? finished = null;
+        lock (_watchers)
+        {
+            for (var i = _watchers.Count - 1; i >= 0; i--)
+            {
+                var w = _watchers[i];
+                if (IsCoroutineDead(w.Coroutine) || UnityObjectGuard.IsDead(w.Panel))
+                {
+                    (finished ??= new List<string>()).Add(w.Key);
+                    _watchers.RemoveAt(i);
+                }
+            }
+        }
+        if (finished == null) return;
+        foreach (var key in finished)
+        {
+            PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} 重播轮播完（协程结束侦测）");
+            OnRoundFinished(key);
+        }
+    }
+
+    /// <summary>Manual 面板的真正关板（停止续聊时）：调用捕获的退出动作，并补调游戏的结束回调（恢复 NPC/重开聊后菜单）。</summary>
+    private static void CloseIfManual(string key, Entry entry)
+    {
+        if (entry.ExitAction == null) return; // 非 Manual 轮，游戏自己关板
+        try
+        {
+            entry.ExitAction.Invoke();
+            PluginContext.Log.LogInfo($"[MystiaAI] 续聊: 包 {key} Manual 面板已退出关板");
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] Manual 面板退出失败（{key}）: {ex.Message}");
+        }
+        entry.ExitAction = null;
+        entry.StartPlay = null;
+        if (entry.GameFinishCallback != null)
+        {
+            try
+            {
+                entry.GameFinishCallback.Invoke();
+            }
+            catch (Exception ex)
+            {
+                PluginContext.Log.LogWarning($"[MystiaAI] 游戏结束回调异常（{key}）: {ex.Message}");
+            }
+            entry.GameFinishCallback = null;
+        }
+    }
+
+    /// <summary>取（并钉住）Manual 模式四个回调。</summary>
+    private static ManualSuite GetManualSuite(string key)
+    {
+        if (PinnedManual.TryGetValue(key, out var suite) && suite.Continue != null)
+            return suite;
+
+        suite = new ManualSuite();
+        suite.MContinue = () => OnRoundFinished(key);
+        suite.MPlayFirst = a =>
+        {
+            if (Entries.TryGetValue(key, out var e)) e.StartPlay = a;
+        };
+        suite.MCanExit = a =>
+        {
+            if (Entries.TryGetValue(key, out var e)) e.ExitAction = a;
+        };
+        suite.MLoadFinish = () =>
+        {
+            if (!Entries.TryGetValue(key, out var e) || e.StartPlay == null) return;
+            try { e.StartPlay.Invoke(); }
+            catch (Exception ex) { PluginContext.Log.LogWarning($"[MystiaAI] Manual 首句放行失败（{key}）: {ex.Message}"); }
+        };
+        suite.Continue = (Il2CppSystem.Action)suite.MContinue;
+        suite.PlayFirst = (Il2CppSystem.Action<Il2CppSystem.Action>)suite.MPlayFirst;
+        suite.CanExit = (Il2CppSystem.Action<Il2CppSystem.Action>)suite.MCanExit;
+        suite.LoadFinish = (Il2CppSystem.Action)suite.MLoadFinish;
+        PinnedManual[key] = suite;
+        return suite;
     }
 
     /// <summary>白天时段才允许续聊（与 GetGameTimeText 的白天分支同口径）。</summary>
@@ -254,7 +482,7 @@ internal static class DialogContinuation
         }
     }
 
-    /// <summary>真正关闭残留的聊后选项菜单面板（含隐藏中的实例），防止面板栈在对话间隙还原其视觉造成闪回。</summary>    /// <summary>
+    /// <summary>
     /// 对话真正结束时记录长期记忆（MemoryStore.Record 内部会截取 transcript 尾部、
     /// 去重、按配置上限裁剪）。失败只记日志，不影响对话流程。
     /// </summary>
@@ -270,24 +498,6 @@ internal static class DialogContinuation
         catch (Exception ex)
         {
             PluginContext.Log.LogWarning($"[MystiaAI] 记忆记录失败（不影响对话）: {ex.Message}");
-        }
-    }
-
-    /// <summary>真正关闭残留的聊后选项菜单面板（含隐藏中的实例），防止面板栈在对话间隙还原其视觉造成闪回。</summary>
-    private static void CloseLingeringChatMenu()
-    {
-        try
-        {
-            foreach (var panel in UnityEngine.Object.FindObjectsOfType<DayScene.UI.DaySceneChatSelectionPannel>(true))
-            {
-                if (UnityObjectGuard.IsDead(panel)) continue;
-                panel.ClosePanel();
-                PluginContext.Log.LogInfo("[MystiaAI] 续聊: 已关闭残留的选项菜单面板（防闪回）");
-            }
-        }
-        catch (Exception ex)
-        {
-            PluginContext.Log.LogWarning($"[MystiaAI] 续聊: 关闭残留菜单面板失败（不影响续聊）: {ex.Message}");
         }
     }
 

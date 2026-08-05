@@ -964,7 +964,8 @@ internal sealed class FreeInputOverlay
     /// <summary>
     /// 把覆盖层插到指针所在的根层级子节点之前：在 RootCanvas 直接子节点中找出
     /// 子树含 cursor/mouse 元素的那个，SetSiblingIndex 到它的位置（它随后顺移 +1）。
-    /// 找不到时退化为 SetAsFirstSibling 并打 Warning（绝不能 SetAsLastSibling，那会更压指针）。
+    /// 找不到指针时退化为「插到对话框面板正上方」（Manual 模式下指针不在根层级直子节点中），
+    /// 再找不到才 SetAsLastSibling（最顶，可能遮指针，但比压在对话框下看不见强）。
     /// </summary>
     private void InsertBelowCursor(Canvas gameRoot)
     {
@@ -988,18 +989,48 @@ internal sealed class FreeInputOverlay
             if (cursorRoot != null)
             {
                 _root.transform.SetSiblingIndex(cursorIndex);
+                return;
             }
-            else
+
+            // 回退 1：插到对话框面板（的根层级祖先）正上方
+            var dialogRoot = DirectChildOf(_panel == null ? null : _panel.transform, rootTf);
+            if (dialogRoot != null)
             {
-                _root.transform.SetAsFirstSibling();
-                PluginContext.Log.LogWarning(
-                    "[MystiaAI] FreeInputOverlay: 未在 RootCanvas 直接子节点中定位到指针元素，" +
-                    "退化为 SetAsFirstSibling（覆盖层可能压在对话框之下，请反馈）");
+                _root.transform.SetSiblingIndex(dialogRoot.GetSiblingIndex() + 1);
+                PluginContext.Log.LogInfo(
+                    "[MystiaAI] FreeInputOverlay: 未定位到指针元素，已插到对话框正上方");
+                return;
             }
+
+            // 回退 2：最顶（指针可能被遮，但覆盖层可见可点）
+            _root.transform.SetAsLastSibling();
+            PluginContext.Log.LogWarning(
+                "[MystiaAI] FreeInputOverlay: 指针与对话框均未定位到，退化为 SetAsLastSibling（指针可能被遮挡，请反馈）");
         }
         catch (Exception ex)
         {
             PluginContext.Log.LogError($"[MystiaAI] FreeInputOverlay.InsertBelowCursor 异常: {ex}");
+        }
+    }
+
+    /// <summary>找 t 的祖先中直接挂在 parent 下的那个节点（含 t 本身）。无则 null。</summary>
+    private static Transform? DirectChildOf(Transform? t, Transform parent)
+    {
+        try
+        {
+            var cur = t;
+            Transform? last = null;
+            while (cur != null)
+            {
+                if (ReferenceEquals(cur.parent, parent)) return cur;
+                last = cur;
+                cur = cur.parent;
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
