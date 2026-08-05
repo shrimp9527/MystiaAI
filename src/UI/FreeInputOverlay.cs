@@ -89,6 +89,14 @@ internal sealed class FreeInputOverlay
     /// <summary>Close 已排队到 Update 通道（防 Poll 在 drain 前重复入队）。</summary>
     private bool _closeQueued;
 
+    /// <summary>打开瞬间的实时时间（秒）：打开后 200ms 内忽略一切点击，吸收双击习惯造成的误触。</summary>
+    private readonly float _openedAtRealtime;
+
+    /// <summary>打开瞬间左键已按下：覆盖层常在一次点击的「按下后、释放前」打开（点击推进 NPC 末句
+    /// 触发玩家回合），这次陈旧释放若落在「完成」位置会被当成点完成 → 空输入跳过玩家回合。
+    /// 置位后忽略一切释放，直到出现一次全新的按下（新点击的释放正常生效）。</summary>
+    private bool _suppressUntilFreshPress;
+
     /// <summary>AI 建议按钮（状态机：生成中… → 可用(显示建议文本) / 建议不可用；点击=直接采用并确认）。</summary>
     private readonly Button[] _suggestionButtons = new Button[2];
     private readonly TextMeshProUGUI[] _suggestionLabels = new TextMeshProUGUI[2];
@@ -132,6 +140,15 @@ internal sealed class FreeInputOverlay
         _onClosed = onClosed;
         _panel = panel;
         _unavailableText = unavailableText;
+        _openedAtRealtime = UnityEngine.Time.realtimeSinceStartup;
+        try
+        {
+            _suppressUntilFreshPress = Mouse.current?.leftButton.isPressed == true;
+        }
+        catch
+        {
+            _suppressUntilFreshPress = false; // 输入系统读取失败不阻塞打开
+        }
 
         TMP_FontAsset? font = null;
         Step("取字体", () =>
@@ -776,7 +793,26 @@ internal sealed class FreeInputOverlay
         // 鼠标点击：不订阅 UnityEvent（native → managed thunk 会崩，见 _regenButton 注释），
         // 改为轮询左键释放 + RectTransform 命中检测（只读原生调用，全程可靠）
         var mouse = Mouse.current;
-        if (mouse == null || !mouse.leftButton.wasReleasedThisFrame) return;
+        if (mouse == null) return;
+
+        // 防误触（旧 bug：鼠标停在「完成」位置时，推进 NPC 末句的那次点击把玩家回合直接跳过）：
+        // 1) 打开瞬间左键已按下 → 这次陈旧释放不算数，直到出现全新按下；
+        // 2) 打开后 200ms 内的点击一律忽略（吸收双击习惯）。
+        if (_suppressUntilFreshPress)
+        {
+            if (mouse.leftButton.wasPressedThisFrame)
+            {
+                _suppressUntilFreshPress = false;
+                PluginContext.Log.LogInfo("[MystiaAI] FreeInputOverlay: 检测到全新按下，解除陈旧释放抑制");
+            }
+            else
+            {
+                return;
+            }
+        }
+        if (UnityEngine.Time.realtimeSinceStartup - _openedAtRealtime < 0.2f) return;
+
+        if (!mouse.leftButton.wasReleasedThisFrame) return;
         var pos = mouse.position.ReadValue();
 
         for (var i = 0; i < _suggestionButtons.Length; i++)
