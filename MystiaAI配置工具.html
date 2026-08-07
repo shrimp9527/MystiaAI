@@ -189,6 +189,25 @@
     border-radius: 6px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 16px;
   }
   .bond-input { width: 420px; }
+  /* 长期记忆子页 */
+  #memBanner {
+    background: rgba(176, 58, 42, .1); border: 1px solid #b03a2a; color: #b03a2a;
+    border-radius: 6px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 16px;
+  }
+  .mem-item {
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 10px; background: #fff;
+  }
+  .mem-meta { font-size: 12px; color: var(--dim); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .mem-meta .mem-del { margin-left: auto; padding: 2px 10px; font-size: 12px; }
+  .mem-text {
+    width: 100%; min-height: 54px; resize: vertical; font-size: 13px; font-family: inherit;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 7px 9px; line-height: 1.5;
+  }
+  .mem-text:focus { outline: none; border-color: var(--accent); }
+  .mem-actions { display: flex; gap: 12px; margin-top: 16px; }
+  button.armed { background: #b03a2a; border-color: #b03a2a; color: #fff; }
   #charEditor textarea:focus { outline: none; border-color: var(--accent); }
   .placeholder-warn { color: #b03a2a; font-size: 12px; }
 
@@ -248,7 +267,7 @@
     <div class="field"><label>启用羁绊提示词</label><input type="checkbox" id="s_bondEnabled"></div>
     <div class="hint">开启后 {bondTone} 变量按羁绊等级注入你在「提示词结构 → 羁绊提示词」里配置的内容；关闭时该变量恒为空</div>
     <div class="field"><label>长期记忆（默认开）</label><input type="checkbox" id="s_memoryEnabled" checked></div>
-    <div class="hint">NPC 会记住与你的过往对话（存于 memories.json），下次见面时自然承接之前聊过的话题；关闭后不记录也不注入</div>
+    <div class="hint">NPC 会记住与你的过往对话（存于 memories.json，在「提示词结构 → 长期记忆」查看和管理），下次见面时自然承接之前聊过的话题；关闭后不记录也不注入</div>
     <div class="field"><label>每角色保留记忆条数</label><input type="number" id="s_memoryMax" min="1" max="200" step="1" value="10"></div>
     <div class="field"><label>每次注入记忆条数（0=不注入）</label><input type="number" id="s_memoryInject" min="0" max="20" step="1" value="3"></div>
   </div>
@@ -291,6 +310,7 @@
       <div class="subtab" data-ptab="user">User 提示词</div>
       <div class="subtab" data-ptab="rating">评价提示词</div>
       <div class="subtab" data-ptab="bond">羁绊提示词</div>
+      <div class="subtab" data-ptab="memory">长期记忆</div>
     </div>
     <div id="ptabSys">
       <h2>System 提示词（NPC 台词生成）</h2>
@@ -351,6 +371,18 @@
       <div class="field"><label>羁绊 3 级</label><input type="text" id="b_char_3" class="bond-input"></div>
       <div class="field"><label>羁绊 4 级</label><input type="text" id="b_char_4" class="bond-input"></div>
       <div class="field"><label>羁绊 5 级</label><input type="text" id="b_char_5" class="bond-input"></div>
+    </div>
+    <div id="ptabMemory" style="display:none">
+      <div id="memBanner">⚠ 请在游戏关闭时编辑本页——游戏运行中会把内存里的旧记忆写回文件，覆盖你的修改</div>
+      <h2>长期记忆（存于 memories.json）</h2>
+      <div class="hint">NPC 与玩家的过往对话片段，对话时注入给 AI 承接话题（保留/注入条数见「通用设置」）。可逐条修改或删除，保存后生效。</div>
+      <div class="field"><label>角色</label><select id="m_char"></select></div>
+      <div id="m_empty" class="hint" style="display:none">该角色暂无记忆</div>
+      <div id="m_list"></div>
+      <div class="mem-actions">
+        <button id="m_clearChar">清空该角色全部记忆</button>
+        <button id="m_clearAll">清空所有角色的长期记忆</button>
+      </div>
     </div>
   </div>
 </main>
@@ -1043,7 +1075,7 @@ const DEFAULT_USER_DAYCHAT = "{situationLine}\n{news}{memories}{transcript}\n以
 const DEFAULT_USER_DAYSINGLE = "{situationLine}和她随口闲聊一句。\n{news}{memories}{playerReply}";
 const DEFAULT_USER_NIGHTCHAT = "{situationLine}随口和老板娘闲聊一句。\n{news}{memories}{playerReply}";
 const DEFAULT_USER_EVAL = "{situationLine}你吃的是「{dish}」{dishDesc}{dishIngredients}，禁止增加未提及的食材，评价等级为「{rating}」。{ratingTone}说出一句符合该评价的感想。{memories}";
-const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{memories}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
+const DEFAULT_USER_REPLYOPTS = "{mystiaSituationLine}\n{news}{transcript}\n以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：「{npcLine}」。请给出 {optionCount} 个简短的回应选项。要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；每条不超过{maxLength}字；每个选项一行，不要编号，不要引号，不要解释；使用{language}。";
 
 function defaultPrompts() {
   return {
@@ -1062,10 +1094,15 @@ function defaultPersonas() {
   return JSON.parse(document.getElementById("builtinPersonasData").textContent);
 }
 
+function defaultMemories() {
+  return { _meta: { tool: "MystiaAI", kind: "memories", version: "1" }, characters: {} };
+}
+
 /* ================= 状态（两个文件并行编辑） ================= */
 const settingsState = { data: null, dirty: false, created: false };
 const personasState = { data: null, dirty: false, created: false };
 const promptsState = { data: null, dirty: false, created: false };
+const memoriesState = { data: null, dirty: false, created: false };
 let dirHandle = null;   // FileSystemDirectoryHandle（无目录写权限的浏览器为 null，保存退化为下载）
 let dirName = "";
 let selectedKey = null; // 角色设定页当前选中（"cat:Default" 或 "char:Rumia"）
@@ -1073,7 +1110,7 @@ let selectedKey = null; // 角色设定页当前选中（"cat:Default" 或 "char
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
 function setStatus(msg, cls) { statusEl.textContent = msg; statusEl.className = cls || ""; }
-function anyDirty() { return settingsState.dirty || personasState.dirty || promptsState.dirty; }
+function anyDirty() { return settingsState.dirty || personasState.dirty || promptsState.dirty || memoriesState.dirty; }
 function refreshSaveBtn() { $("btnSave").disabled = !anyDirty(); }
 function markDirty(st) { st.dirty = true; refreshSaveBtn(); }
 
@@ -1143,7 +1180,7 @@ async function openFolder() {
 
 // readFile(name) → Promise<text>，文件不存在时抛 NotFoundError
 async function readFromDirectory(readFile) {
-  settingsState.data = null; personasState.data = null; promptsState.data = null;
+  settingsState.data = null; personasState.data = null; promptsState.data = null; memoriesState.data = null;
   let found = 0; const notes = []; const errors = [];
 
   // settings.json
@@ -1198,6 +1235,37 @@ async function readFromDirectory(readFile) {
     }
   }
 
+  // memories.json（可选：游戏首次记录记忆时才生成，缺失不视为错误、不主动新建）
+  {
+    try {
+      const text = await readFile("memories.json");
+      const d = JSON.parse(text);
+      if (d && typeof d === "object" && !Array.isArray(d)) {
+        d.characters = (d.characters && typeof d.characters === "object") ? d.characters : {};
+        // 归一化：条目必须是对象数组（过滤手改文件产生的非法条目）
+        for (const k of Object.keys(d.characters)) {
+          if (!Array.isArray(d.characters[k])) { delete d.characters[k]; continue; }
+          d.characters[k] = d.characters[k].filter(x => x && typeof x === "object");
+        }
+        memoriesState.data = d;
+        memoriesState.dirty = false; memoriesState.created = false;
+        let n = 0;
+        for (const list of Object.values(d.characters)) if (Array.isArray(list)) n += list.length;
+        notes.push(`memories.json 已加载（${n} 条记忆）`);
+      } else {
+        memoriesState.data = defaultMemories();
+        errors.push("memories.json 结构无法识别（已按空记忆载入，保存会覆盖原文件）");
+      }
+    } catch (e) {
+      if (e && e.name === "NotFoundError") {
+        memoriesState.data = defaultMemories(); // 无记忆是常态，不写文件
+      } else {
+        memoriesState.data = defaultMemories();
+        errors.push("memories.json 读取失败（已按空记忆载入，原文件未动；游戏端会自动备份重建）：" + e.message);
+      }
+    }
+  }
+
   if (found === 0 && !settingsState.created && !personasState.created) {
     // 两个文件都读到了但都不认 → 选错文件夹
     dirHandle = null;
@@ -1219,6 +1287,7 @@ function afterLoad() {
   if (settingsState.data) fillSettingsForm();
   if (personasState.data) { normalizePersonas(); renderCharTree(); selectKey("cat:Default"); }
   if (promptsState.data) fillPromptsForm();
+  if (memoriesState.data) refreshMemoryTab(); // 当前正停在长期记忆页时同步刷新，防陈旧显示
   refreshSaveBtn();
 }
 
@@ -1265,6 +1334,10 @@ async function saveAll() {
     jobs.push(["personas.json", JSON.stringify(personasState.data, null, 2), personasState]);
   if (promptsState.data && promptsState.dirty)
     jobs.push(["prompts.json", JSON.stringify(promptsState.data, null, 2), promptsState]);
+  if (memoriesState.data && memoriesState.dirty) {
+    memoriesState.data._meta = { tool: "MystiaAI", kind: "memories", version: "1" };
+    jobs.push(["memories.json", JSON.stringify(memoriesState.data, null, 2), memoriesState]);
+  }
   if (!jobs.length) { setStatus("没有需要保存的修改", ""); return; }
   try {
     for (const [name, text, st] of jobs) {
@@ -1301,6 +1374,8 @@ async function newConfig() {
   personasState.dirty = true; personasState.created = true;
   promptsState.data = defaultPrompts();
   promptsState.dirty = true; promptsState.created = true;
+  memoriesState.data = defaultMemories();
+  memoriesState.dirty = false; memoriesState.created = false; // 记忆不属于"默认配置"，新建配置时保持为空且不写文件
   afterLoad();
   setStatus(`已创建默认配置（目标：${dirName}），点「保存修改」写入`, "ok");
 }
@@ -1683,10 +1758,12 @@ function switchPromptTab(ptab) {
   $("ptabUser").style.display = ptab === "user" ? "" : "none";
   $("ptabRating").style.display = ptab === "rating" ? "" : "none";
   $("ptabBond").style.display = ptab === "bond" ? "" : "none";
-  // 评价/羁绊提示词均为纯文本注入，不支持变量替换，这两个页签下隐藏变量悬浮窗
-  $("placeholderPanel").style.display = (ptab === "bond" || ptab === "rating") ? "none" : "";
+  $("ptabMemory").style.display = ptab === "memory" ? "" : "none";
+  // 评价/羁绊提示词均为纯文本注入，不支持变量替换；记忆页没有变量。这三个页签下隐藏变量悬浮窗
+  $("placeholderPanel").style.display = (ptab === "bond" || ptab === "rating" || ptab === "memory") ? "none" : "";
   if (ptab === "bond") refreshBondTab();
   if (ptab === "rating") refreshRatingTab();
+  if (ptab === "memory") refreshMemoryTab();
   // 子页签切换后编辑区重新可见，重算高亮防错位
   requestAnimationFrame(reHighlightAllPromptEditors);
 }
@@ -1807,6 +1884,127 @@ for (let i = 1; i <= 5; i++) {
   });
 }
 
+/* ================= 长期记忆子页 ================= */
+const MEM_SCENE_NAMES = { DayChat: "白天闲聊", NightChat: "夜晚闲聊", Evaluation: "用餐评价" };
+
+// 记忆 key 是游戏内部名（稀客 stringId 如 Wriggle）：优先按 personas 的 label 反查显示名
+function memCharDisplayName(key) {
+  const d = personasState.data;
+  if (d && d.characters) {
+    for (const e of Object.values(d.characters))
+      if (e.label === key && e.displayName) return e.displayName;
+    if (d.characters[key] && d.characters[key].displayName) return d.characters[key].displayName;
+  }
+  return key;
+}
+
+function refreshMemoryTab() {
+  const d = memoriesState.data;
+  const sel = $("m_char");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const keys = d
+    ? Object.keys(d.characters).filter(k => Array.isArray(d.characters[k]) && d.characters[k].length > 0)
+    : [];
+  keys.sort((a, b) => memCharDisplayName(a).localeCompare(memCharDisplayName(b), "zh"));
+  for (const k of keys) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = `${memCharDisplayName(k)}（${d.characters[k].length} 条）`;
+    sel.appendChild(opt);
+  }
+  if (prev && keys.includes(prev)) sel.value = prev;
+  renderMemoryList();
+}
+
+function renderMemoryList() {
+  const d = memoriesState.data;
+  const key = $("m_char").value;
+  const list = (d && key && Array.isArray(d.characters[key])) ? d.characters[key] : [];
+  $("m_empty").style.display = list.length ? "none" : "";
+  const box = $("m_list");
+  box.innerHTML = "";
+  // 最新一条显示在最上面（文件里按时间先后追加）
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i] || {};
+    const item = document.createElement("div");
+    item.className = "mem-item";
+    const meta = document.createElement("div");
+    meta.className = "mem-meta";
+    const scene = MEM_SCENE_NAMES[e.scene] || e.scene || "对话";
+    const when = e.gameTime ? e.gameTime + " ｜ " : "";
+    let saved = "";
+    if (e.savedAtUtc) {
+      const t = new Date(e.savedAtUtc);
+      if (!isNaN(t)) saved = " ｜ 记于 " + t.toLocaleString("zh-CN", { hour12: false });
+    }
+    meta.textContent = when + scene + saved;
+    const del = document.createElement("button");
+    del.className = "mem-del";
+    del.textContent = "删除";
+    del.onclick = () => {
+      list.splice(i, 1);
+      if (!list.length) delete d.characters[key];
+      markDirty(memoriesState);
+      refreshMemoryTab();
+    };
+    meta.appendChild(del);
+    const ta = document.createElement("textarea");
+    ta.className = "mem-text";
+    ta.value = e.text || "";
+    ta.addEventListener("change", () => {
+      e.text = ta.value.trim();
+      markDirty(memoriesState);
+    });
+    item.appendChild(meta);
+    item.appendChild(ta);
+    box.appendChild(item);
+  }
+}
+
+$("m_char").addEventListener("change", renderMemoryList);
+
+// 二级确认通用：第一次点击武装（变红+改文案，3 秒未点第二次自动还原），第二次点击才执行
+function armConfirm(btn, armedText, action) {
+  if (btn.dataset.armed === "1") {
+    disarmConfirm(btn);
+    action();
+    return;
+  }
+  btn.dataset.armed = "1";
+  btn.dataset.origText = btn.textContent;
+  btn.textContent = armedText;
+  btn.classList.add("armed");
+  btn._armTimer = setTimeout(() => disarmConfirm(btn), 3000);
+}
+function disarmConfirm(btn) {
+  clearTimeout(btn._armTimer);
+  delete btn.dataset.armed;
+  btn.classList.remove("armed");
+  if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
+}
+
+$("m_clearChar").addEventListener("click", () => {
+  const d = memoriesState.data; if (!d) return;
+  const key = $("m_char").value; if (!key || !d.characters[key]) return;
+  armConfirm($("m_clearChar"), "再点一次确认清空该角色", () => {
+    delete d.characters[key];
+    markDirty(memoriesState);
+    refreshMemoryTab();
+    setStatus("已清空该角色记忆（点「保存修改」写入文件）", "ok");
+  });
+});
+
+$("m_clearAll").addEventListener("click", () => {
+  const d = memoriesState.data; if (!d) return;
+  armConfirm($("m_clearAll"), "再点一次确认清空全部记忆", () => {
+    d.characters = {};
+    markDirty(memoriesState);
+    refreshMemoryTab();
+    setStatus("已清空全部长期记忆（点「保存修改」写入文件）", "ok");
+  });
+});
+
 /* ================= 变量点击复制 ================= */
 function showCopyToast(text) {
   let t = $("copyToast");
@@ -1854,7 +2052,7 @@ function switchTab(pageId) {
   // 变量悬浮窗只在提示词结构页签显示（且评价/羁绊子页签下隐藏）
   const activePtab = (document.querySelector(".subtab.active") || {}).dataset?.ptab;
   $("placeholderPanel").style.display =
-    (pageId === "promptsPage" && activePtab !== "bond" && activePtab !== "rating") ? "" : "none";
+    (pageId === "promptsPage" && activePtab !== "bond" && activePtab !== "rating" && activePtab !== "memory") ? "" : "none";
   // 页签从隐藏变为可见后重算高亮（隐藏时布局为 0，滚动条补偿会测错）
   if (pageId === "promptsPage") requestAnimationFrame(reHighlightAllPromptEditors);
 }

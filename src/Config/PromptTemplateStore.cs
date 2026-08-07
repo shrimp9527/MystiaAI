@@ -36,7 +36,7 @@ public sealed class PromptTemplateStore
         "开朗勤劳的夜雀妖怪，经营移动居酒屋的老板娘，歌声动听、待人热情。" +
         "你要产出的是给玩家挑选的米斯蒂娅台词选项，不是在扮演 {characterName}。";
 
-    // ---- 内置默认：五条生成路径的 user 模板（与旧版硬编码输出一致 + {memories} 长期记忆挂点）----
+    // ---- 内置默认：五条生成路径的 user 模板（建议回复路径只带本次聊天上下文，不含 {memories} 长期记忆）----
 
     public const string DefaultUserDayChat =
         "{situationLine}\n{news}{memories}{transcript}\n" +
@@ -56,7 +56,7 @@ public sealed class PromptTemplateStore
         "{ratingTone}说出一句符合该评价的感想。{memories}";
 
     public const string DefaultUserReplyOptions =
-        "{mystiaSituationLine}\n{news}{memories}{transcript}\n" +
+        "{mystiaSituationLine}\n{news}{transcript}\n" +
         "以上是米斯蒂娅与对方的完整对话。玩家（扮演米斯蒂娅）现在要回应对方最后这句话：" +
         "「{npcLine}」。请给出 {optionCount} 个简短的回应选项。" +
         "要求：以米斯蒂娅（开朗勤劳的居酒屋老板娘夜雀）的口吻；风格各异（比如一热情一吐槽）；" +

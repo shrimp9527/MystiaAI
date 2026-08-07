@@ -492,6 +492,8 @@ internal static class DialogContinuation
         {
             if (!Entries.TryGetValue(key, out var entry)) return;
             if (string.IsNullOrWhiteSpace(entry.CharacterKey)) return;
+            // 无 KEY（假 AI 模式）不记录：玩家看到的全是游戏原文/测试文本，不是真实对话
+            if (PluginContext.UseFakeAi) return;
             MemoryStore.Record(entry.CharacterKey, transcript,
                 DialogPannelPatch.GetGameTimeText(), ChatScene.DayChat.ToString());
         }

@@ -61,7 +61,7 @@ public static class MemoryStore
     private static Dictionary<string, List<MemoryEntry>> _characters = new();
     private static bool _loaded;
 
-    /// <summary>初始化（PluginContext.Initialize 调用）。失败不抛，记忆功能静默降级。</summary>
+    /// <summary>初始化（PluginContext.Initialize 调用）。失败不抛；文件损坏时备份后重建，功能不静默失效。</summary>
     public static void Initialize(ManualLogSource? log)
     {
         _log = log;
@@ -76,7 +76,27 @@ public static class MemoryStore
         }
         catch (Exception ex)
         {
-            log?.LogWarning($"[MystiaAI] 长期记忆加载失败（本次会话记忆不可用）: {ex.Message}");
+            // 损坏的 memories.json（断电写坏/手工改错格式）不能永久静默禁用记忆：
+            // 备份坏文件为 memories.json.bak，以空表重建，下次记录时写出全新文件
+            try
+            {
+                if (File.Exists(StoreFile))
+                {
+                    File.Copy(StoreFile, StoreFile + ".bak", overwrite: true);
+                    File.Delete(StoreFile);
+                }
+                lock (Gate)
+                {
+                    _characters = new Dictionary<string, List<MemoryEntry>>();
+                    _loaded = true;
+                }
+                log?.LogWarning(
+                    $"[MystiaAI] 长期记忆文件损坏，已备份为 memories.json.bak 并以空表重建（原错误: {ex.Message}）");
+            }
+            catch (Exception ex2)
+            {
+                log?.LogWarning($"[MystiaAI] 长期记忆加载失败且备份失败（本次会话记忆不可用）: {ex.Message}；{ex2.Message}");
+            }
         }
     }
 
@@ -216,6 +236,10 @@ public static class MemoryStore
         var text = string.Join("\n", parts);
         if (text.Length > EntryTextLimit)
             text = text.Substring(text.Length - EntryTextLimit); // 超限截尾部（保留最新内容）
+        // 防孤立代理项：截取起点若落在 surrogate pair 中间（低代理项），丢弃它——
+        // 孤立代理项会让 System.Text.Json 序列化抛异常，导致之后每次保存都静默失败
+        if (text.Length > 0 && char.IsLowSurrogate(text[0]))
+            text = text.Substring(1);
         return text;
     }
 

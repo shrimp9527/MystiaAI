@@ -64,6 +64,9 @@ internal static class NightBubblePatch
         public bool Resolved;
         public bool AiDone;                        // watcher 已尘埃落定（成功/失败/超时）
         public string? ReadyText;                  // AI 结果（null = 失败/超时）
+        public bool IsSpecial;                     // 稀客（长期记忆只记稀客）
+        public string? Dish;                       // 评价菜品名（已解析，长期记忆用）
+        public string? Rating;                     // 评价等级（长期记忆用）
     }
 
     /// <summary>每个在场客人控制器的轮询状态（按 controller.Pointer 索引）。</summary>
@@ -683,6 +686,10 @@ internal static class NightBubblePatch
                 ["news"] = NewspaperReader.GetTodayNewsSummary(),
                 // 人设分类：普客走 NormalGuest 分类人设，稀客走角色专属/SpecialGuest 兜底
                 ["personaCategory"] = isSpecial ? PersonaStore.CategorySpecialGuest : PersonaStore.CategoryNormalGuest,
+                // 长期记忆只给稀客（与夜晚只记稀客一致；普客恒空串，与既有行为相同）
+                ["memories"] = isSpecial
+                    ? MemoryStore.GetRecentText(characterKey, PluginContext.Settings.MemoryInjectCount)
+                    : string.Empty,
             };
             if (food != null)
             {
@@ -718,6 +725,9 @@ internal static class NightBubblePatch
                 CharacterKey = characterKey,
                 Scene = scene,
                 Original = original,
+                IsSpecial = isSpecial,
+                Dish = extra.TryGetValue("dish", out var resolvedDish) ? resolvedDish : null,
+                Rating = rating,
                 AiTask = DialogPannelPatch.StartGeneration(context),
             };
             Pending.Add(pending);
@@ -835,10 +845,38 @@ internal static class NightBubblePatch
             RewrittenTexts[pending.BoxPtr] = aiText; // 登记已改写文本，下一轮扫描认出自己的 AI 文本不再误报
             PluginContext.Log.LogInfo(
                 $"[MystiaAI] NightBubble: {pending.Scene}（{pending.CharacterKey}）气泡原地改写为 AI 文本「{Truncate(aiText)}」");
+            // 长期记忆（仅稀客、仅 AI 文本真正上屏时记；无 KEY 假 AI 不记，与白天门槛一致）
+            if (pending.IsSpecial && !PluginContext.UseFakeAi)
+                TryRecordBubbleMemory(pending, aiText);
         }
         catch (Exception ex)
         {
             PluginContext.Log.LogError($"[MystiaAI] NightBubble.TryFinalize 异常: {ex}");
+        }
+    }
+
+    /// <summary>夜晚稀客长期记忆：闲聊记 AI 闲聊内容；评价记「吃了什么 + 评级 + 评价语」。失败只记日志。</summary>
+    private static void TryRecordBubbleMemory(PendingBubble pending, string aiText)
+    {
+        try
+        {
+            string transcript;
+            if (pending.Scene == ChatScene.Evaluation)
+            {
+                var dishPart = string.IsNullOrWhiteSpace(pending.Dish) ? "用了餐" : $"吃了「{pending.Dish}」";
+                var ratingPart = string.IsNullOrWhiteSpace(pending.Rating) ? "" : $"，评价「{pending.Rating}」";
+                transcript = $"{dishPart}{ratingPart}：{aiText}";
+            }
+            else
+            {
+                transcript = aiText;
+            }
+            MemoryStore.Record(pending.CharacterKey, transcript,
+                DialogPannelPatch.GetGameTimeText(), pending.Scene.ToString());
+        }
+        catch (Exception ex)
+        {
+            PluginContext.Log.LogWarning($"[MystiaAI] NightBubble 记忆记录失败（不影响气泡）: {ex.Message}");
         }
     }
 

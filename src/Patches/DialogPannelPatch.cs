@@ -1111,7 +1111,8 @@ internal static class DialogPannelPatch
                     if (!string.IsNullOrEmpty(input)) { hadInput = true; break; }
                 }
                 // 本轮是否以玩家说话收尾（续聊承接用）：从尾往前找最后一句有效发言——
-                // 被组略过的空 Self 句不算；撞上 NPC 句则说明是 NPC 收尾
+                // 被组略过的空 Self 句不算；未定型的 NPC 句（AI 未生成就被跳过，玩家看到的是
+                // 占位符）也不算；撞上已定型的 NPC 句则说明是 NPC 收尾
                 var endedWithPlayerSpeech = false;
                 var segs = active.Replacement.Segments;
                 for (var i = segs.Count - 1; i >= 0; i--)
@@ -1127,9 +1128,14 @@ internal static class DialogPannelPatch
                         }
                         continue;
                     }
+                    if (active.NpcByDialogId.TryGetValue(seg.DialogId, out var npc) && npc.FinalText == null)
+                        continue; // 未定型 NPC 句：玩家没看到实际内容，跳过
                     if (active.Originals.ContainsKey(seg.DialogId)) break;
                 }
-                return (BuildActualTranscript(active, int.MaxValue), hadInput, active.ExitRequested, endedWithPlayerSpeech);
+                // 快照 transcript 跳过未定型 NPC 句（skipUnsettledNpc: true）：
+                // 那句玩家看到的是占位符「……」，记进记忆/带给续聊上下文都是"没发生过的对话"
+                return (BuildActualTranscript(active, int.MaxValue, skipUnsettledNpc: true),
+                    hadInput, active.ExitRequested, endedWithPlayerSpeech);
             }
             return null;
         }
